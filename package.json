@@ -4,20 +4,33 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "dev": "next dev",
+    "build": "next build",
     "test": "vitest run",
     "lint": "eslint .",
     "format": "prettier --write .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "lucide-react": "^0.509.0",
+    "next": "^16.1.6",
+    "postcss": "^8.4.47",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.19",
+    "autoprefixer": "^10.4.19"
+  },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
     "@types/node": "^22.10.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.2",
-    "vitest": "^2.1.8"
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
   }
 }

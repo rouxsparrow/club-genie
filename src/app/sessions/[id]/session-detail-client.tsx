@@ -1,0 +1,195 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { closeSession, getClubTokenStorageKey, getSession, validateClubToken } from "../../../lib/edge";
+
+type GateState = "checking" | "denied" | "allowed";
+
+type StoredTokenResult = {
+  token: string | null;
+  shouldCleanUrl: boolean;
+};
+
+type SessionDetail = {
+  id: string;
+  session_date: string;
+  status: string;
+  start_time: string | null;
+  end_time: string | null;
+  total_fee: number | null;
+};
+
+type CourtDetail = {
+  id: string;
+  court_label: string | null;
+  start_time: string | null;
+  end_time: string | null;
+};
+
+type SessionDetailClientProps = {
+  sessionId: string;
+  searchParams: Record<string, string | string[] | undefined>;
+};
+
+function readTokenFromLocation(searchParams: URLSearchParams): StoredTokenResult {
+  const key = getClubTokenStorageKey();
+  const tokenFromUrl = searchParams.get("t");
+
+  if (tokenFromUrl) {
+    localStorage.setItem(key, tokenFromUrl);
+    return { token: tokenFromUrl, shouldCleanUrl: true };
+  }
+
+  const existingToken = localStorage.getItem(key);
+  return { token: existingToken, shouldCleanUrl: false };
+}
+
+function clearStoredToken() {
+  const key = getClubTokenStorageKey();
+  localStorage.removeItem(key);
+}
+
+function formatDate(dateValue: string) {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) {
+    return dateValue;
+  }
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  });
+}
+
+export default function SessionDetailClient({ sessionId, searchParams }: SessionDetailClientProps) {
+  const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+  const [gateState, setGateState] = useState<GateState>("checking");
+  const [session, setSession] = useState<SessionDetail | null>(null);
+  const [courts, setCourts] = useState<CourtDetail[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [closeMessage, setCloseMessage] = useState<string | null>(null);
+  const [closing, setClosing] = useState(false);
+
+  const memoizedParams = useMemo(() => {
+    const params = new URLSearchParams();
+    Object.entries(searchParams).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((entry) => params.append(key, entry));
+      } else if (typeof value === "string") {
+        params.set(key, value);
+      }
+    });
+    return params;
+  }, [searchParams]);
+
+  useEffect(() => {
+    setMounted(true);
+    const { token, shouldCleanUrl } = readTokenFromLocation(memoizedParams);
+
+    if (!token || !sessionId) {
+      setGateState("denied");
+      router.replace("/denied");
+      return;
+    }
+
+    if (shouldCleanUrl) {
+      router.replace(`/sessions/${sessionId}`);
+    }
+
+    validateClubToken(token)
+      .then((valid) => {
+        if (!valid) {
+          clearStoredToken();
+          setGateState("denied");
+          router.replace("/denied");
+          return;
+        }
+        setGateState("allowed");
+        return getSession(token, sessionId);
+      })
+      .then((response) => {
+        if (!response || !response.ok) {
+          setLoading(false);
+          return;
+        }
+        setSession(response.session ?? null);
+        setCourts(response.courts ?? []);
+        setLoading(false);
+      })
+      .catch(() => {
+        clearStoredToken();
+        setGateState("denied");
+        router.replace("/denied");
+      });
+  }, [memoizedParams, router, sessionId]);
+
+  const handleCloseSession = async () => {
+    const token = localStorage.getItem(getClubTokenStorageKey());
+    if (!token || !sessionId) return;
+    setClosing(true);
+    const result = await closeSession(token, sessionId);
+    setClosing(false);
+    setCloseMessage(result.ok ? "Session closed." : "Close failed.");
+  };
+
+  if (gateState !== "allowed") {
+    return <main />;
+  }
+
+  if (!mounted || loading) {
+    return (
+      <main className="mx-auto max-w-4xl px-6 py-16">
+        <div className="card">
+          <h1 className="text-3xl font-semibold">Session Details</h1>
+          <p className="mt-2 text-slate-500 dark:text-slate-300">Loading...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return (
+      <main className="mx-auto max-w-4xl px-6 py-16">
+        <div className="card">
+          <h1 className="text-3xl font-semibold">Session Details</h1>
+          <p className="mt-2 text-slate-500 dark:text-slate-300">Session not found.</p>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-4xl px-6 py-16">
+      <div className="card">
+        <h1 className="text-3xl font-semibold">Session Details</h1>
+        <p className="mt-2 text-slate-500 dark:text-slate-300">
+          <strong>{formatDate(session.session_date)}</strong> — {session.status}
+        </p>
+      </div>
+      {courts.length === 0 ? (
+        <p className="mt-6 text-slate-500 dark:text-slate-300">No courts listed yet.</p>
+      ) : (
+        <ul className="mt-6 space-y-2">
+          {courts.map((court) => (
+            <li key={court.id} className="card">
+              {court.court_label ?? "Court"} — {court.start_time ?? ""} {court.end_time ? `to ${court.end_time}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-6 flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={handleCloseSession}
+          disabled={closing}
+          className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900"
+        >
+          {closing ? "Closing..." : "Close Session"}
+        </button>
+        {closeMessage ? <p className="text-sm text-slate-500">{closeMessage}</p> : null}
+      </div>
+    </main>
+  );
+}

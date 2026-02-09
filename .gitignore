@@ -16,3 +16,6 @@ coverage
 # Env
 .env.*
 !.env.example
+
+# Supabase
+.supabase

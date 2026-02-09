@@ -26,8 +26,23 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - On parse failure, create a DRAFT session and notify admin by email.
 - Public users can join or withdraw from OPEN sessions, including multi-player registration.
 - Admin can edit session details and fix DRAFT sessions.
+- Admin can manage players (add, rename, deactivate/reactivate).
 - Admin can close sessions immediately and trigger Splitwise expense recording.
+- Admin can rotate the club access token and share a new invite link.
 - Session closing cron creates Splitwise expenses and marks sessions CLOSED, idempotently.
+
+## Access Model
+- A single club-level access token is embedded in the shared link once and stored in localStorage.
+- Missing or invalid token renders Access Denied (no input field).
+- All reads/writes go through Edge Functions; no direct browser DB access.
+- Store only a hashed token in `club_settings.token_hash` (never raw token).
+- Admin can rotate the token via Edge Function to invalidate prior links.
+- Admin login uses a signed httpOnly cookie (`admin_session`) with HMAC.
+
+### Token Setup (Admin)
+1. Generate a token: `openssl rand -hex 24`
+2. Hash it: `printf '%s' "<token>" | openssl dgst -sha256 | awk '{print $2}'`
+3. Seed DB: `insert into club_settings (token_hash) values ('<hash>');`
 
 ## Non-Functional Requirements
 - Simplicity over scale; clear admin workflows.

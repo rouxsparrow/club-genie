@@ -24,19 +24,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Session date is required." }, { status: 400 });
   }
 
-  const { data: session, error } = await supabaseAdmin
-    .from("sessions")
-    .insert({
-      session_date: payload.session_date,
-      status: payload.status ?? "DRAFT",
-      start_time: payload.start_time,
-      end_time: payload.end_time,
-      location: payload.location,
-      total_fee: payload.total_fee,
-      remarks: payload.remarks
-    })
-    .select("id")
-    .single();
+  const baseInsert = {
+    session_date: payload.session_date,
+    status: payload.status ?? "DRAFT",
+    start_time: payload.start_time,
+    end_time: payload.end_time,
+    total_fee: payload.total_fee
+  };
+
+  const insertCandidates = [
+    { ...baseInsert, location: payload.location, remarks: payload.remarks },
+    { ...baseInsert, remarks: payload.remarks },
+    { ...baseInsert, location: payload.location },
+    { ...baseInsert }
+  ];
+
+  let sessionInsert = await supabaseAdmin.from("sessions").insert(insertCandidates[0]).select("id").single();
+  for (let i = 1; i < insertCandidates.length && sessionInsert.error; i += 1) {
+    const message = sessionInsert.error.message ?? "";
+    if (!message.includes("location") && !message.includes("remarks")) {
+      break;
+    }
+    sessionInsert = await supabaseAdmin.from("sessions").insert(insertCandidates[i]).select("id").single();
+  }
+
+  const session = sessionInsert.data;
+  const error = sessionInsert.error;
 
   if (error || !session) {
     return NextResponse.json({ ok: false, error: error?.message ?? "Failed to create session." }, { status: 500 });

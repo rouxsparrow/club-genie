@@ -45,6 +45,7 @@ async function validateClubToken(supabase: ReturnType<typeof createClient>, toke
   const { data, error } = await supabase
     .from("club_settings")
     .select("token_hash")
+    .order("token_version", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -55,6 +56,12 @@ async function validateClubToken(supabase: ReturnType<typeof createClient>, toke
 
   const incomingHash = await hashToken(token);
   return timingSafeEqual(incomingHash, data.token_hash);
+}
+
+function formatPlayerList(names: string[]) {
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
 }
 
 Deno.serve(async (req) => {
@@ -115,6 +122,51 @@ Deno.serve(async (req) => {
       status: 409,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
+  }
+
+  const { data: players, error: playersError } = await supabase
+    .from("players")
+    .select("id, name")
+    .in("id", playerIds);
+
+  if (playersError) {
+    return new Response(JSON.stringify({ ok: false, error: "players_lookup_failed" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+
+  const playerById = new Map((players ?? []).map((player) => [player.id, player.name ?? player.id]));
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("session_participants")
+    .select("player_id")
+    .eq("session_id", sessionId)
+    .in("player_id", playerIds);
+
+  if (existingError) {
+    return new Response(JSON.stringify({ ok: false, error: "participants_lookup_failed" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+
+  const joinedIdSet = new Set((existingRows ?? []).map((row) => row.player_id));
+  const notJoinedNames = playerIds
+    .filter((playerId) => !joinedIdSet.has(playerId))
+    .map((playerId) => playerById.get(playerId) ?? playerId);
+
+  if (notJoinedNames.length > 0) {
+    const namesText = formatPlayerList(notJoinedNames);
+    const subject = notJoinedNames.length > 1 ? "Players" : "Player";
+    const suffix = notJoinedNames.length > 1 ? "have" : "has";
+    return new Response(
+      JSON.stringify({ ok: false, error: `${subject} ${namesText} ${suffix} not joined this session.` }),
+      {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      }
+    );
   }
 
   const { error: deleteError } = await supabase

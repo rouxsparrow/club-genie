@@ -170,11 +170,12 @@ async function postJoinWithdraw(
     body: JSON.stringify(payload)
   });
 
+  const data = (await response.json().catch(() => null)) as JoinWithdrawResponse | null;
   if (!response.ok) {
-    return { ok: false };
+    return { ok: false, error: data?.error };
   }
 
-  return (await response.json()) as JoinWithdrawResponse;
+  return data ?? { ok: false, error: "request_failed" };
 }
 
 export function joinSession(token: string, payload: JoinWithdrawPayload) {

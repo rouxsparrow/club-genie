@@ -45,6 +45,7 @@ async function validateClubToken(supabase: ReturnType<typeof createClient>, toke
   const { data, error } = await supabase
     .from("club_settings")
     .select("token_hash")
+    .order("token_version", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -86,12 +87,29 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { data: sessions, error } = await supabase
-    .from("sessions")
-    .select("id, session_date, status, start_time, end_time, total_fee, location, remarks")
-    .order("session_date", { ascending: true });
+  const selectCandidates = [
+    "id, session_date, status, start_time, end_time, total_fee, location, remarks",
+    "id, session_date, status, start_time, end_time, total_fee, remarks",
+    "id, session_date, status, start_time, end_time, total_fee, location",
+    "id, session_date, status, start_time, end_time, total_fee"
+  ] as const;
 
-  if (error) {
+  let sessionsQuery = await supabase.from("sessions").select(selectCandidates[0]).order("session_date", { ascending: true });
+  for (let i = 1; i < selectCandidates.length && sessionsQuery.error; i += 1) {
+    const message = sessionsQuery.error.message ?? "";
+    if (!message.includes("location") && !message.includes("remarks")) {
+      break;
+    }
+    sessionsQuery = await supabase.from("sessions").select(selectCandidates[i]).order("session_date", { ascending: true });
+  }
+
+  const sessions = (sessionsQuery.data ?? []).map((session) => ({
+    ...session,
+    location: "location" in session ? session.location : null,
+    remarks: "remarks" in session ? session.remarks : null
+  }));
+
+  if (sessionsQuery.error) {
     return new Response(JSON.stringify({ ok: false }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" }

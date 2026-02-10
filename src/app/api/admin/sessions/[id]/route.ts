@@ -21,18 +21,31 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     courts?: CourtInput[];
   };
 
-  const { error: updateError } = await supabaseAdmin
-    .from("sessions")
-    .update({
-      session_date: payload.session_date,
-      status: payload.status,
-      start_time: payload.start_time,
-      end_time: payload.end_time,
-      location: payload.location,
-      total_fee: payload.total_fee,
-      remarks: payload.remarks
-    })
-    .eq("id", id);
+  const baseUpdate = {
+    session_date: payload.session_date,
+    status: payload.status,
+    start_time: payload.start_time,
+    end_time: payload.end_time,
+    total_fee: payload.total_fee
+  };
+
+  const updateCandidates = [
+    { ...baseUpdate, location: payload.location, remarks: payload.remarks },
+    { ...baseUpdate, remarks: payload.remarks },
+    { ...baseUpdate, location: payload.location },
+    { ...baseUpdate }
+  ];
+
+  let updateResult = await supabaseAdmin.from("sessions").update(updateCandidates[0]).eq("id", id);
+  for (let i = 1; i < updateCandidates.length && updateResult.error; i += 1) {
+    const message = updateResult.error.message ?? "";
+    if (!message.includes("location") && !message.includes("remarks")) {
+      break;
+    }
+    updateResult = await supabaseAdmin.from("sessions").update(updateCandidates[i]).eq("id", id);
+  }
+
+  const updateError = updateResult.error;
 
   if (updateError) {
     return NextResponse.json({ ok: false, error: updateError.message }, { status: 500 });

@@ -45,6 +45,7 @@ async function validateClubToken(supabase: ReturnType<typeof createClient>, toke
   const { data, error } = await supabase
     .from("club_settings")
     .select("token_hash")
+    .order("token_version", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

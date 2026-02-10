@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { closeSession, getClubTokenStorageKey, getSession, validateClubToken } from "../../../lib/edge";
 
@@ -29,7 +29,6 @@ type CourtDetail = {
 
 type SessionDetailClientProps = {
   sessionId: string;
-  searchParams: Record<string, string | string[] | undefined>;
 };
 
 function readTokenFromLocation(searchParams: URLSearchParams): StoredTokenResult {
@@ -62,7 +61,7 @@ function formatDate(dateValue: string) {
   });
 }
 
-export default function SessionDetailClient({ sessionId, searchParams }: SessionDetailClientProps) {
+export default function SessionDetailClient({ sessionId }: SessionDetailClientProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [gateState, setGateState] = useState<GateState>("checking");
@@ -72,21 +71,10 @@ export default function SessionDetailClient({ sessionId, searchParams }: Session
   const [closeMessage, setCloseMessage] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
 
-  const memoizedParams = useMemo(() => {
-    const params = new URLSearchParams();
-    Object.entries(searchParams).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        value.forEach((entry) => params.append(key, entry));
-      } else if (typeof value === "string") {
-        params.set(key, value);
-      }
-    });
-    return params;
-  }, [searchParams]);
-
   useEffect(() => {
     setMounted(true);
-    const { token, shouldCleanUrl } = readTokenFromLocation(memoizedParams);
+    const params = new URLSearchParams(window.location.search);
+    const { token, shouldCleanUrl } = readTokenFromLocation(params);
 
     if (!token || !sessionId) {
       setGateState("denied");
@@ -123,7 +111,7 @@ export default function SessionDetailClient({ sessionId, searchParams }: Session
         setGateState("denied");
         router.replace("/denied");
       });
-  }, [memoizedParams, router, sessionId]);
+  }, [router, sessionId]);
 
   const handleCloseSession = async () => {
     const token = localStorage.getItem(getClubTokenStorageKey());

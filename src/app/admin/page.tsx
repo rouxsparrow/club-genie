@@ -2,7 +2,9 @@
 
 import { Lock, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import AdminNavbar from "../../components/admin-navbar";
 import ThemeToggle from "../../components/theme-toggle";
+import { getClubTokenStorageKey } from "../../lib/edge";
 
 type TabKey = "players" | "club";
 
@@ -31,12 +33,20 @@ export default function AdminPage() {
   const [isRotating, setIsRotating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [rotationError, setRotationError] = useState<string | null>(null);
+  const [currentToken, setCurrentToken] = useState<string | null>(null);
+  const [currentAccessLink, setCurrentAccessLink] = useState<string | null>(null);
+  const [clubMessage, setClubMessage] = useState<string | null>(null);
 
   const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
   const inactivePlayers = useMemo(() => players.filter((player) => !player.active), [players]);
 
   useEffect(() => {
     setMounted(true);
+    const token = localStorage.getItem(getClubTokenStorageKey());
+    if (token) {
+      setCurrentToken(token);
+      setCurrentAccessLink(`${window.location.origin}/sessions?t=${token}`);
+    }
     let isMounted = true;
     fetch("/api/admin/players", { credentials: "include" })
       .then((response) => response.json())
@@ -146,6 +156,7 @@ export default function AdminPage() {
   const handleRotateToken = async () => {
     setIsRotating(true);
     setRotationError(null);
+    setClubMessage(null);
     const response = await fetch("/api/admin/club-token/rotate", {
       method: "POST",
       credentials: "include"
@@ -157,6 +168,9 @@ export default function AdminPage() {
       return;
     }
     setNewToken(data.token);
+    localStorage.setItem(getClubTokenStorageKey(), data.token);
+    setCurrentToken(data.token);
+    setCurrentAccessLink(`${window.location.origin}/sessions?t=${data.token}`);
     setIsRotating(false);
   };
 
@@ -167,14 +181,22 @@ export default function AdminPage() {
     setRotationError("Invite link copied.");
   };
 
+  const copyCurrentAccessLink = async () => {
+    if (!currentAccessLink) return;
+    await navigator.clipboard.writeText(currentAccessLink);
+    setClubMessage("Current access link copied.");
+  };
+
   if (!mounted) {
     return <main />;
   }
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-16">
-      <header className="flex flex-wrap items-start justify-between gap-6">
-        <div>
+      <header className="flex flex-col gap-6">
+        <AdminNavbar currentPath="/admin" />
+        <div className="flex flex-wrap items-start justify-between gap-6">
+          <div>
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-500">Admin Console</p>
           <h1 className="mt-2 text-4xl font-semibold">Club Control Room</h1>
           <p className="mt-2 text-slate-500 dark:text-slate-300">
@@ -182,6 +204,7 @@ export default function AdminPage() {
           </p>
         </div>
         <ThemeToggle />
+        </div>
       </header>
 
       <nav className="mt-8 flex flex-wrap gap-3">
@@ -331,7 +354,7 @@ export default function AdminPage() {
       ) : null}
 
       {activeTab === "club" ? (
-        <section className="mt-8 grid gap-6 md:grid-cols-[1.2fr,1fr]">
+        <section className="mt-8 grid gap-6 md:grid-cols-2">
           <div className="card">
             <div className="flex items-center gap-3 text-slate-600 dark:text-slate-300">
               <Lock size={18} />
@@ -376,6 +399,36 @@ export default function AdminPage() {
             <p className="mt-4 text-xs text-slate-400">
               Example: https://your-app/sessions?t=NEW_TOKEN
             </p>
+          </div>
+          <div className="card md:col-span-2">
+            <h3 className="text-lg font-semibold">Current Access Link</h3>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
+              This is the access link built from the token currently stored in this browser.
+            </p>
+            {clubMessage ? <p className="mt-3 text-sm text-slate-500">{clubMessage}</p> : null}
+            {currentAccessLink ? (
+              <div className="mt-4 grid gap-3">
+                <code className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-slate-100 px-3 py-2 text-xs dark:border-ink-700/60 dark:bg-ink-900/40">
+                  {currentAccessLink}
+                </code>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={copyCurrentAccessLink}
+                    className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900"
+                  >
+                    Copy Current Link
+                  </button>
+                  <code className="rounded-xl border border-slate-200/70 bg-slate-100 px-3 py-2 text-xs dark:border-ink-700/60 dark:bg-ink-900/40">
+                    {currentToken}
+                  </code>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 text-sm text-slate-500 dark:text-slate-300">
+                No token found in local storage for this browser yet.
+              </p>
+            )}
           </div>
         </section>
       ) : null}

@@ -66,6 +66,7 @@ Deno.serve(async (req) => {
   const { data: latest, error: latestError } = await supabase
     .from("club_settings")
     .select("token_hash, token_version")
+    .order("token_version", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

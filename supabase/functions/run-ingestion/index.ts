@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { isAutomationSecretValid } from "../_shared/automation-auth.ts";
+import { resolveGmailOauthConfig } from "../_shared/gmail-config.ts";
 import {
   buildGmailQueryFromKeywords,
   ingestionDefaults,
@@ -57,19 +58,27 @@ async function getAutomationSettings(supabase: ReturnType<typeof createClient>):
   };
 }
 
-async function getGmailAccessToken() {
-  const clientId = Deno.env.get("GMAIL_CLIENT_ID");
-  const clientSecret = Deno.env.get("GMAIL_CLIENT_SECRET");
-  const refreshToken = Deno.env.get("GMAIL_REFRESH_TOKEN");
+async function getGmailAccessToken(supabase: ReturnType<typeof createClient>) {
+  const { data } = await supabase
+    .from("gmail_oauth_config")
+    .select("client_id,client_secret,refresh_token")
+    .eq("id", 1)
+    .maybeSingle();
 
-  if (!clientId || !clientSecret || !refreshToken) {
+  const resolved = resolveGmailOauthConfig(data, {
+    GMAIL_CLIENT_ID: Deno.env.get("GMAIL_CLIENT_ID"),
+    GMAIL_CLIENT_SECRET: Deno.env.get("GMAIL_CLIENT_SECRET"),
+    GMAIL_REFRESH_TOKEN: Deno.env.get("GMAIL_REFRESH_TOKEN")
+  });
+
+  if (!resolved) {
     throw new Error("missing_gmail_oauth_config");
   }
 
   const body = new URLSearchParams({
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: refreshToken,
+    client_id: resolved.clientId,
+    client_secret: resolved.clientSecret,
+    refresh_token: resolved.refreshToken,
     grant_type: "refresh_token"
   });
 
@@ -252,10 +261,23 @@ Deno.serve(async (req) => {
   const automationSecret = providedSecret as string;
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  if (!supabaseUrl || !anonKey) {
+  if (!supabaseUrl) {
     return new Response(JSON.stringify({ ok: false, error: "missing_supabase_config" }), {
       status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+
+  const headerApiKey = req.headers.get("apikey")?.trim() ?? "";
+  const authHeader = req.headers.get("authorization")?.trim() ?? "";
+  const bearerPrefix = "bearer ";
+  const authToken = authHeader.toLowerCase().startsWith(bearerPrefix)
+    ? authHeader.slice(bearerPrefix.length).trim()
+    : "";
+  const anonKey = headerApiKey || authToken;
+  if (!anonKey) {
+    return new Response(JSON.stringify({ ok: false, error: "missing_request_api_key" }), {
+      status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
@@ -286,7 +308,7 @@ Deno.serve(async (req) => {
       : buildGmailQueryFromKeywords(settings.subjectKeywords);
 
   try {
-    const { access_token } = await getGmailAccessToken();
+    const { access_token } = await getGmailAccessToken(supabase);
     const list = await listGmailMessages(access_token, query);
     const messageIds = list.messages?.map((message) => message.id) ?? [];
 

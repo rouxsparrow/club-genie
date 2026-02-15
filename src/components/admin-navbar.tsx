@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 type AdminNavbarProps = {
-  currentPath: "/sessions" | "/admin";
+  currentPath: "/sessions" | "/admin" | "/admin/gmail-config";
   className?: string;
 };
 

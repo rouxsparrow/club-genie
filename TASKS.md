@@ -79,8 +79,13 @@
 - [x] Add dedicated automation secret auth for ingestion endpoints.
 - [x] Add daily scheduler workflow (GitHub Actions) for `run-ingestion`.
 - [x] Add admin automation controls (keyword config + manual run + parse failure queue).
+- [x] Add admin email preview page for fetched Gmail content (text/HTML) via `fetch-gmail-receipts` proxy endpoint.
+- [x] Upgrade Playtomic parser to extract Date/Time/Club/Court/Paid format with DD/MM primary date parsing and MM/DD fallback.
+- [x] Enforce same-day location consistency during receipt merge (conflicts become `parse_failed` + DRAFT handling).
 - [x] Add ingestion aggregation logic for same-day receipts (sum fee + deterministic courts).
 - [x] Add unit tests for automation auth, query builder, timezone conversion, and aggregation.
+- [x] Add backward-compatible club token admin API behavior for missing `token_value` migration, with warning metadata and hash-only rotate fallback.
+- [x] Add unit tests for club token compatibility helpers (missing-column detection, token normalization, warning messages).
 
 ## MVP (Current)
 - [x] Admin login with signed httpOnly cookie.
@@ -89,6 +94,7 @@
 - [x] Join/withdraw dialog for public users.
 - [x] Admin create/edit session dialog + endpoints.
 - [x] Club token rotation endpoint + invite link UI.
+- [x] Move Admin Club Access current-link source from browser localStorage to DB-backed API, add admin Gmail config page (`/admin/gmail-config`) for Supabase-stored OAuth values, and load Gmail OAuth config from DB in Supabase Edge Functions with env fallback (test rationale: covered by `npm test` + `npm run lint` + `npm run typecheck`; browser repro required for admin page flows and ingestion run confirmation).
 - [x] Harden token rotation/validation to select latest by `token_version` (fallback `created_at`) and guard admin rotation against Supabase URL mismatch to prevent Access Denied after rotation (test rationale: covered by `npm test`; edge-function integration validated manually via local admin rotate + remote `validate-token` call).
 - [x] Prevent false Access Denied on `/sessions` when `api/admin-session` request fails; token validity is now the only access gate (test rationale: covered by `npm test` + `npm run lint`; manual repro expected in browser with network error simulation).
 - [x] Parse invite token from `window.location.search` in client pages (`/sessions`, `/sessions/[id]`) to ensure `?t=...` is captured reliably in local dev (test rationale: covered by `npm test` + `npm run lint` + `npm run typecheck`; browser repro required for final confirmation).

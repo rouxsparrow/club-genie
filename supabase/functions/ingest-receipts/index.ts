@@ -66,7 +66,7 @@ function toCourtJson(courts: ParsedCourtRow[]) {
 async function recomputeSessionForDate(supabase: ReturnType<typeof createClient>, sessionDate: string) {
   const { data: receipts, error: receiptsError } = await supabase
     .from("email_receipts")
-    .select("parsed_total_fee, parsed_courts")
+    .select("parsed_total_fee, parsed_courts, parsed_location")
     .eq("parse_status", "SUCCESS")
     .eq("parsed_session_date", sessionDate);
 
@@ -96,6 +96,7 @@ async function recomputeSessionForDate(supabase: ReturnType<typeof createClient>
         start_time: aggregate.startTime,
         end_time: aggregate.endTime,
         total_fee: aggregate.totalFee,
+        location: aggregate.location,
         updated_at: new Date().toISOString()
       },
       { onConflict: "session_date" }
@@ -127,6 +128,36 @@ async function recomputeSessionForDate(supabase: ReturnType<typeof createClient>
   }
 
   return session.id;
+}
+
+function normalizeLocation(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+async function hasLocationConflict(
+  supabase: ReturnType<typeof createClient>,
+  sessionDate: string,
+  location: string
+) {
+  const { data, error } = await supabase
+    .from("email_receipts")
+    .select("parsed_location")
+    .eq("parse_status", "SUCCESS")
+    .eq("parsed_session_date", sessionDate);
+
+  if (error) {
+    throw new Error("location_consistency_check_failed");
+  }
+
+  const incomingLocation = normalizeLocation(location);
+  for (const receipt of data ?? []) {
+    if (typeof receipt.parsed_location !== "string") continue;
+    const existingLocation = normalizeLocation(receipt.parsed_location);
+    if (existingLocation && existingLocation !== incomingLocation) {
+      return true;
+    }
+  }
+  return false;
 }
 
 Deno.serve(async (req) => {
@@ -194,7 +225,8 @@ Deno.serve(async (req) => {
       parse_error: parseError,
       parsed_session_date: sessionDate,
       parsed_total_fee: null,
-      parsed_courts: null
+      parsed_courts: null,
+      parsed_location: null
     });
 
     if (sessionDate) {
@@ -216,6 +248,37 @@ Deno.serve(async (req) => {
     });
   }
 
+  const locationConflict = await hasLocationConflict(supabase, parsed.sessionDate, parsed.location);
+  if (locationConflict) {
+    await supabase.from("email_receipts").insert({
+      gmail_message_id: messageId,
+      received_at: new Date().toISOString(),
+      raw_html: persistedRawBody,
+      parse_status: "FAILED",
+      parse_error: "location_conflict",
+      parsed_session_date: parsed.sessionDate,
+      parsed_total_fee: null,
+      parsed_courts: null,
+      parsed_location: parsed.location
+    });
+
+    await supabase
+      .from("sessions")
+      .upsert(
+        {
+          session_date: parsed.sessionDate,
+          status: "DRAFT",
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: "session_date" }
+      );
+
+    return new Response(JSON.stringify({ ok: false, error: "parse_failed", reason: "location_conflict" }), {
+      status: 422,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+
   const { error: insertReceiptError } = await supabase.from("email_receipts").insert({
     gmail_message_id: messageId,
     received_at: new Date().toISOString(),
@@ -223,7 +286,8 @@ Deno.serve(async (req) => {
     parse_status: "SUCCESS",
     parsed_session_date: parsed.sessionDate,
     parsed_total_fee: parsed.totalFee,
-    parsed_courts: toCourtJson(parsed.courts)
+    parsed_courts: toCourtJson(parsed.courts),
+    parsed_location: parsed.location
   });
 
   if (insertReceiptError) {

@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
+import { isMissingTokenValueColumnError, warningMessageForCode } from "../../../../../lib/club-token-compat";
 import { sha256Hex } from "../../../../../lib/crypto";
 import { getSupabaseAdmin } from "../../../../../lib/supabase/admin";
 
@@ -45,9 +46,27 @@ export async function POST() {
 
   const { error } = await supabaseAdmin.from("club_settings").insert({
     token_hash: tokenHash,
+    token_value: token,
     token_version: nextVersion,
     rotated_at: new Date().toISOString()
   });
+
+  if (isMissingTokenValueColumnError(error)) {
+    const { error: fallbackError } = await supabaseAdmin.from("club_settings").insert({
+      token_hash: tokenHash,
+      token_version: nextVersion,
+      rotated_at: new Date().toISOString()
+    });
+    if (fallbackError) {
+      return NextResponse.json({ ok: false, error: fallbackError.message }, { status: 500 });
+    }
+    return NextResponse.json({
+      ok: true,
+      token,
+      warningCode: "token_value_not_persisted",
+      warningMessage: warningMessageForCode("token_value_not_persisted")
+    });
+  }
 
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });

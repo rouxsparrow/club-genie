@@ -1,6 +1,7 @@
-const COURT_LINE_REGEX = /Court\s*([A-Za-z0-9]+)\s*\|\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/i;
-const SESSION_DATE_REGEX = /Session Date:\s*(\d{4}-\d{2}-\d{2})/i;
-const TOTAL_FEE_REGEX = /Total Fee:\s*([0-9]+(?:\.[0-9]{2})?)/i;
+const DATE_LINE_REGEX = /\bDate\s*:?\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/i;
+const TIME_RANGE_REGEX = /\bTime\s*:?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-–—]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\b/i;
+const LOCATION_COURT_LINE_REGEX = /\b(Club\s+[^,\n]+?)\s*,\s*([A-Za-z]\d+)\b/i;
+const TOTAL_FEE_REGEX = /\bPaid\s+(?:SGD|\$)\s*([0-9]+(?:\.[0-9]{1,2})?)\b/i;
 const DEFAULT_KEYWORDS = ["Playtomic", "Receipt"];
 const DEFAULT_LOOKBACK_DAYS = 30;
 const SINGAPORE_TZ = "Asia/Singapore";
@@ -15,7 +16,13 @@ export type ParsedCourt = {
 export type ParsedReceipt = {
   sessionDate: string;
   totalFee: number;
+  location: string;
   courts: ParsedCourt[];
+};
+
+type LocationCourt = {
+  location: string;
+  courtCode: string;
 };
 
 function unique(values: string[]) {
@@ -30,6 +37,104 @@ function normalizeClockTime(value: string) {
     throw new Error("invalid_time_value");
   }
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function normalizeFreeText(value: string) {
+  return value.replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").trim();
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function stripHtmlToText(rawHtml: string) {
+  const withLineBreaks = rawHtml
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|tr|h1|h2|h3|h4|h5|h6)>/gi, "\n");
+  const withoutTags = withLineBreaks.replace(/<[^>]+>/g, " ");
+  return decodeHtmlEntities(withoutTags);
+}
+
+function buildParseableRaw(rawHtml: string, rawText: string | null) {
+  const parts = [rawText ?? "", stripHtmlToText(rawHtml)];
+  return parts
+    .join("\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => normalizeFreeText(line))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function normalizeYear(rawYear: string) {
+  const year = Number(rawYear);
+  if (!Number.isInteger(year) || year < 0) return null;
+  return rawYear.length === 2 ? 2000 + year : year;
+}
+
+function isValidDateParts(day: number, month: number, year: number) {
+  if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year)) return false;
+  if (day < 1 || month < 1 || month > 12) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() + 1 === month &&
+    date.getUTCDate() === day
+  );
+}
+
+function toIsoDate(day: number, month: number, year: number) {
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function parseMeridiemTime(value: string) {
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])$/);
+  if (!match) {
+    throw new Error("invalid_time_format");
+  }
+  const rawHour = Number(match[1]);
+  const rawMinute = Number(match[2]);
+  if (!Number.isInteger(rawHour) || rawHour < 1 || rawHour > 12 || !Number.isInteger(rawMinute) || rawMinute < 0 || rawMinute > 59) {
+    throw new Error("invalid_time_value");
+  }
+  const meridiem = match[3].toUpperCase();
+  const hour = meridiem === "AM" ? rawHour % 12 : (rawHour % 12) + 12;
+  return `${String(hour).padStart(2, "0")}:${String(rawMinute).padStart(2, "0")}`;
+}
+
+function parseTimeRange(raw: string) {
+  const match = raw.match(TIME_RANGE_REGEX);
+  if (!match) return null;
+
+  return {
+    startClock: parseMeridiemTime(match[1]),
+    endClock: parseMeridiemTime(match[2])
+  };
+}
+
+function extractLocationAndCourt(raw: string): LocationCourt | null {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    const match = line.match(LOCATION_COURT_LINE_REGEX);
+    if (!match) continue;
+    return {
+      location: normalizeFreeText(match[1]),
+      courtCode: match[2].toUpperCase()
+    };
+  }
+
+  const fallbackMatch = raw.match(LOCATION_COURT_LINE_REGEX);
+  if (!fallbackMatch) return null;
+  return {
+    location: normalizeFreeText(fallbackMatch[1]),
+    courtCode: fallbackMatch[2].toUpperCase()
+  };
 }
 
 function escapeKeyword(keyword: string) {
@@ -98,8 +203,22 @@ export function buildGmailQueryFromKeywords(keywords: string[], lookbackDays = D
 }
 
 export function parseSessionDate(raw: string) {
-  const match = raw.match(SESSION_DATE_REGEX);
-  return match?.[1] ?? null;
+  const match = raw.match(DATE_LINE_REGEX);
+  if (!match) return null;
+
+  const first = Number(match[1]);
+  const second = Number(match[2]);
+  const year = normalizeYear(match[3]);
+  if (year === null) return null;
+
+  if (isValidDateParts(first, second, year)) {
+    return toIsoDate(first, second, year);
+  }
+  if (isValidDateParts(second, first, year)) {
+    return toIsoDate(second, first, year);
+  }
+
+  return null;
 }
 
 export function parseTotalFee(raw: string) {
@@ -123,28 +242,44 @@ export function toIsoFromLocalTime(sessionDate: string, rawTime: string, timezon
 }
 
 export function parseCourts(raw: string, sessionDate: string, timezone: string) {
-  const lines = raw.split(/\r?\n/).map((line) => line.trim());
-  const courts: ParsedCourt[] = [];
-
-  for (const line of lines) {
-    const match = line.match(COURT_LINE_REGEX);
-    if (!match) continue;
-    const label = `Court ${match[1]}`;
-    const startTime = toIsoFromLocalTime(sessionDate, match[2], timezone);
-    const endTime = toIsoFromLocalTime(sessionDate, match[3], timezone);
-    courts.push({ courtLabel: label, startTime, endTime });
+  const locationAndCourt = extractLocationAndCourt(raw);
+  const timeRange = parseTimeRange(raw);
+  if (!locationAndCourt || !timeRange) {
+    return [];
   }
 
-  return courts;
+  const startTime = toIsoFromLocalTime(sessionDate, timeRange.startClock, timezone);
+  const endTime = toIsoFromLocalTime(sessionDate, timeRange.endClock, timezone);
+  if (endTime <= startTime) {
+    throw new Error("invalid_time_range");
+  }
+
+  return [
+    {
+      courtLabel: `Court ${locationAndCourt.courtCode}`,
+      startTime,
+      endTime
+    }
+  ];
 }
 
 export function parseReceipt(rawHtml: string, rawText: string | null, timezone: string): ParsedReceipt {
-  const raw = [rawHtml, rawText].filter(Boolean).join("\n");
+  const raw = buildParseableRaw(rawHtml, rawText);
   const sessionDate = parseSessionDate(raw);
   const totalFee = parseTotalFee(raw);
+  const locationAndCourt = extractLocationAndCourt(raw);
+  const timeRange = parseTimeRange(raw);
 
   if (!sessionDate) {
     throw new Error("missing_session_date");
+  }
+
+  if (!timeRange) {
+    throw new Error("missing_time_range");
+  }
+
+  if (!locationAndCourt) {
+    throw new Error("missing_location_or_court");
   }
 
   if (totalFee === null || totalFee <= 0) {
@@ -156,14 +291,15 @@ export function parseReceipt(rawHtml: string, rawText: string | null, timezone: 
     throw new Error("missing_courts");
   }
 
-  return { sessionDate, totalFee, courts };
+  return { sessionDate, totalFee, location: locationAndCourt.location, courts };
 }
 
 export function aggregateReceiptsForSessionDate(
-  receipts: Array<{ parsed_total_fee: unknown; parsed_courts: unknown }>
+  receipts: Array<{ parsed_total_fee: unknown; parsed_courts: unknown; parsed_location?: unknown }>
 ) {
   let totalFee = 0;
   const merged: ParsedCourt[] = [];
+  const locations = new Map<string, string>();
 
   for (const receipt of receipts) {
     const fee = asNumber(receipt.parsed_total_fee);
@@ -177,6 +313,13 @@ export function aggregateReceiptsForSessionDate(
         if (parsed) {
           merged.push(parsed);
         }
+      }
+    }
+
+    if (typeof receipt.parsed_location === "string") {
+      const location = normalizeFreeText(receipt.parsed_location);
+      if (location) {
+        locations.set(location.toLowerCase(), location);
       }
     }
   }
@@ -195,7 +338,7 @@ export function aggregateReceiptsForSessionDate(
     return a.courtLabel.localeCompare(b.courtLabel);
   });
 
-  if (courts.length === 0 || totalFee <= 0) {
+  if (courts.length === 0 || totalFee <= 0 || locations.size !== 1) {
     return null;
   }
 
@@ -206,6 +349,7 @@ export function aggregateReceiptsForSessionDate(
     totalFee: Number(totalFee.toFixed(2)),
     startTime,
     endTime,
+    location: locations.values().next().value as string,
     courts
   };
 }

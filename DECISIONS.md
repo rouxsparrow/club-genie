@@ -37,6 +37,24 @@
 - Decision: Run receipt ingestion once daily at 23:30 SGT (15:30 UTC) via GitHub Actions cron calling `run-ingestion`. Authenticate scheduler and admin manual ingestion with `AUTOMATION_SECRET` instead of the rotating club invite token.
 - Rationale: Keeps automation stable when club tokens rotate, provides auditable runs/reruns on free tier, and matches end-of-day SLA.
 
+## ADR-0007: Parse Real Playtomic Receipt Fields and Enforce Same-Location Merge per Session Date
+- Date: 2026-02-15
+- Status: Accepted
+- Decision: Parse session date/time/location/court/paid amount directly from Playtomic email body format (`Date`, `Time`, `Club ... , Court`, `Paid ...`) using DD/MM primary with MM/DD fallback when DD/MM is invalid. Persist `parsed_location` and allow same-day aggregation only when location is consistent across successful receipts.
+- Rationale: Matches real inbound receipt format and prevents silently merging receipts from different venues into one session.
+
+## ADR-0008: Move Admin Club Token Display and Gmail OAuth Config to DB-backed Admin APIs
+- Date: 2026-02-15
+- Status: Accepted
+- Decision: Persist latest raw club token in `club_settings.token_value` so admin can fetch current invite link from DB. Store Gmail OAuth config in `gmail_oauth_config` (singleton row) editable from `/admin/gmail-config`, and have ingestion/fetch Edge Functions read DB config first with env fallback.
+- Rationale: Removes admin dependency on browser-local token state, centralizes Gmail integration settings in Supabase, and enables admin updates without redeploying function secrets.
+
+## ADR-0009: Backward-Compatible Club Token APIs Across Partially-Migrated Environments
+- Date: 2026-02-15
+- Status: Accepted
+- Decision: `club-token/current` and `club-token/rotate` must gracefully handle missing `club_settings.token_value` (Postgres `42703`) by returning warnings and falling back to hash-only rotation when needed.
+- Rationale: Prevents admin-page breakage during staged deployments and allows token rotation continuity before migration completion.
+
 ## Pending Decisions
 - Player identity model (predefined list vs free-text vs hybrid).
 - Admin access control (magic link vs password vs secret URL).

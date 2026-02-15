@@ -4,9 +4,8 @@ import { Lock, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import AdminNavbar from "../../components/admin-navbar";
 import ThemeToggle from "../../components/theme-toggle";
-import { getClubTokenStorageKey } from "../../lib/edge";
 
-type TabKey = "players" | "club" | "automation";
+type TabKey = "players" | "club" | "automation" | "emails" | "gmail";
 
 type Player = {
   id: string;
@@ -28,11 +27,48 @@ type AutomationSettings = {
   updated_at: string | null;
 };
 
+type GmailConfig = {
+  id: number;
+  client_id: string;
+  client_secret: string;
+  refresh_token: string;
+  updated_at: string | null;
+};
+
+type GmailConfigSource = "table" | "env" | "empty";
+
+type ClubTokenWarningCode = "migration_missing_token_value" | "token_not_recoverable";
+
+type ClubTokenCurrentResponse = {
+  ok: boolean;
+  token?: string | null;
+  tokenVersion?: number | null;
+  rotatedAt?: string | null;
+  warningCode?: ClubTokenWarningCode;
+  warningMessage?: string;
+  error?: string;
+};
+
 type ReceiptError = {
   id: string;
   gmail_message_id: string;
   parse_error: string | null;
   received_at: string | null;
+};
+
+type EmailPreviewMessage = {
+  id: string;
+  rawHtml: string | null;
+  rawText: string | null;
+  htmlLength: number;
+  textLength: number;
+  htmlTruncated: boolean;
+  textTruncated: boolean;
+  status: "NOT_INGESTED" | "PARSE_FAILED" | "SESSION_CREATED" | "INGESTED_NO_SESSION";
+  parseError: string | null;
+  parsedSessionDate: string | null;
+  sessionId: string | null;
+  sessionStatus: string | null;
 };
 
 export default function AdminPage() {
@@ -65,24 +101,64 @@ export default function AdminPage() {
   const [currentToken, setCurrentToken] = useState<string | null>(null);
   const [currentAccessLink, setCurrentAccessLink] = useState<string | null>(null);
   const [clubMessage, setClubMessage] = useState<string | null>(null);
+  const [previewQueryInput, setPreviewQueryInput] = useState("");
+  const [loadingEmailPreview, setLoadingEmailPreview] = useState(false);
+  const [emailPreviewMessage, setEmailPreviewMessage] = useState<string | null>(null);
+  const [emailStatusFilter, setEmailStatusFilter] = useState<
+    "ALL" | "SESSION_CREATED" | "PARSE_FAILED" | "NOT_INGESTED" | "INGESTED_NO_SESSION"
+  >("ALL");
+  const [emailPreview, setEmailPreview] = useState<{
+    query: string | null;
+    timezone: string | null;
+    messages: EmailPreviewMessage[];
+  } | null>(null);
+  const [loadingGmailConfig, setLoadingGmailConfig] = useState(true);
+  const [savingGmailConfig, setSavingGmailConfig] = useState(false);
+  const [gmailConfigMessage, setGmailConfigMessage] = useState<string | null>(null);
+  const [gmailClientId, setGmailClientId] = useState("");
+  const [gmailClientSecret, setGmailClientSecret] = useState("");
+  const [gmailRefreshToken, setGmailRefreshToken] = useState("");
+  const [gmailUpdatedAt, setGmailUpdatedAt] = useState<string | null>(null);
+  const [gmailConfigSource, setGmailConfigSource] = useState<GmailConfigSource>("empty");
 
   const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
   const inactivePlayers = useMemo(() => players.filter((player) => !player.active), [players]);
+  const filteredEmailPreviewMessages = useMemo(() => {
+    if (!emailPreview) return [];
+    if (emailStatusFilter === "ALL") return emailPreview.messages;
+    return emailPreview.messages.filter((message) => message.status === emailStatusFilter);
+  }, [emailPreview, emailStatusFilter]);
+
+  const refreshCurrentClubToken = async () => {
+    const response = await fetch("/api/admin/club-token/current", { credentials: "include" });
+    const data = (await response.json()) as ClubTokenCurrentResponse;
+    if (!data.ok) {
+      setClubMessage(data.error ?? "Failed to load current token from DB.");
+      setCurrentToken(null);
+      setCurrentAccessLink(null);
+      return;
+    }
+    const token = typeof data.token === "string" && data.token.trim() ? data.token : null;
+    setCurrentToken(token);
+    setCurrentAccessLink(token ? `${window.location.origin}/sessions?t=${token}` : null);
+    if (!token && data.warningMessage) {
+      setClubMessage(data.warningMessage);
+      return;
+    }
+    setClubMessage(null);
+  };
 
   useEffect(() => {
     setMounted(true);
-    const token = localStorage.getItem(getClubTokenStorageKey());
-    if (token) {
-      setCurrentToken(token);
-      setCurrentAccessLink(`${window.location.origin}/sessions?t=${token}`);
-    }
     let isMounted = true;
     Promise.all([
       fetch("/api/admin/players", { credentials: "include" }).then((response) => response.json()),
       fetch("/api/admin/automation-settings", { credentials: "include" }).then((response) => response.json()),
-      fetch("/api/admin/receipt-errors", { credentials: "include" }).then((response) => response.json())
+      fetch("/api/admin/receipt-errors", { credentials: "include" }).then((response) => response.json()),
+      fetch("/api/admin/club-token/current", { credentials: "include" }).then((response) => response.json()),
+      fetch("/api/admin/gmail-config", { credentials: "include" }).then((response) => response.json())
     ])
-      .then(([playersData, settingsData, errorsData]) => {
+      .then(([playersData, settingsData, errorsData, tokenData, gmailConfigData]) => {
         if (!isMounted) return;
         const playersPayload = playersData as PlayersResponse;
         if (playersPayload.ok) {
@@ -106,6 +182,45 @@ export default function AdminPage() {
           setReceiptErrors(errorsPayload.errors ?? []);
         }
         setLoadingReceiptErrors(false);
+
+        const tokenPayload = tokenData as ClubTokenCurrentResponse;
+        if (tokenPayload.ok) {
+          const token = typeof tokenPayload.token === "string" && tokenPayload.token.trim() ? tokenPayload.token : null;
+          setCurrentToken(token);
+          setCurrentAccessLink(token ? `${window.location.origin}/sessions?t=${token}` : null);
+          if (!token && tokenPayload.warningMessage) {
+            setClubMessage(tokenPayload.warningMessage);
+          } else {
+            setClubMessage(null);
+          }
+        } else {
+          setClubMessage(tokenPayload.error ?? "Failed to load current token from DB.");
+        }
+
+        const gmailPayload = gmailConfigData as {
+          ok: boolean;
+          config?: GmailConfig;
+          source?: GmailConfigSource;
+          error?: string;
+        };
+        if (!gmailPayload.ok || !gmailPayload.config) {
+          setGmailConfigMessage(gmailPayload.error ?? "Failed to load Gmail config.");
+        } else {
+          setGmailClientId(gmailPayload.config.client_id ?? "");
+          setGmailClientSecret(gmailPayload.config.client_secret ?? "");
+          setGmailRefreshToken(gmailPayload.config.refresh_token ?? "");
+          setGmailUpdatedAt(gmailPayload.config.updated_at ?? null);
+          const source = gmailPayload.source ?? "empty";
+          setGmailConfigSource(source);
+          if (source === "env") {
+            setGmailConfigMessage("Loaded from runtime env fallback. Save once to persist in database.");
+          } else if (source === "empty") {
+            setGmailConfigMessage("No Gmail config found yet.");
+          } else {
+            setGmailConfigMessage(null);
+          }
+        }
+        setLoadingGmailConfig(false);
       })
       .catch(() => {
         if (!isMounted) return;
@@ -114,6 +229,9 @@ export default function AdminPage() {
         setAutomationMessage("Failed to load automation settings.");
         setLoadingAutomation(false);
         setLoadingReceiptErrors(false);
+        setClubMessage("Failed to load current token from DB.");
+        setGmailConfigMessage("Failed to load Gmail config.");
+        setLoadingGmailConfig(false);
       });
     return () => {
       isMounted = false;
@@ -217,6 +335,66 @@ export default function AdminPage() {
     await Promise.all([refreshReceiptErrors(), refreshAutomationSettings()]);
   };
 
+  const loadEmailPreview = async () => {
+    setLoadingEmailPreview(true);
+    setEmailPreviewMessage(null);
+    const query = previewQueryInput.trim();
+    const response = await fetch("/api/admin/ingestion/preview", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(query ? { query } : {})
+    });
+    const data = (await response.json()) as {
+      ok: boolean;
+      query?: string | null;
+      timezone?: string | null;
+      messages?: EmailPreviewMessage[];
+      error?: string;
+    };
+    if (!data.ok) {
+      setEmailPreviewMessage(data.error ?? "Failed to load email preview.");
+      setLoadingEmailPreview(false);
+      return;
+    }
+
+    setEmailPreview({
+      query: data.query ?? null,
+      timezone: data.timezone ?? null,
+      messages: data.messages ?? []
+    });
+    setEmailPreviewMessage("Email preview loaded.");
+    setLoadingEmailPreview(false);
+  };
+
+  const saveGmailConfig = async () => {
+    setSavingGmailConfig(true);
+    setGmailConfigMessage(null);
+    const response = await fetch("/api/admin/gmail-config", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        clientId: gmailClientId,
+        clientSecret: gmailClientSecret,
+        refreshToken: gmailRefreshToken
+      })
+    });
+    const data = (await response.json()) as { ok: boolean; config?: GmailConfig; error?: string };
+    if (!data.ok || !data.config) {
+      setGmailConfigMessage(data.error ?? "Failed to save Gmail config.");
+      setSavingGmailConfig(false);
+      return;
+    }
+    setGmailClientId(data.config.client_id ?? "");
+    setGmailClientSecret(data.config.client_secret ?? "");
+    setGmailRefreshToken(data.config.refresh_token ?? "");
+    setGmailUpdatedAt(data.config.updated_at ?? null);
+    setGmailConfigSource("table");
+    setGmailConfigMessage("Gmail config saved.");
+    setSavingGmailConfig(false);
+  };
+
   const handleAddPlayer = async () => {
     setActionMessage(null);
     const name = newPlayerName.trim();
@@ -296,16 +474,25 @@ export default function AdminPage() {
       method: "POST",
       credentials: "include"
     });
-    const data = (await response.json()) as { ok: boolean; token?: string; error?: string };
+    const data = (await response.json()) as {
+      ok: boolean;
+      token?: string;
+      error?: string;
+      warningCode?: "token_value_not_persisted";
+      warningMessage?: string;
+    };
     if (!data.ok || !data.token) {
       setRotationError(data.error ?? "Token rotation failed.");
       setIsRotating(false);
       return;
     }
     setNewToken(data.token);
-    localStorage.setItem(getClubTokenStorageKey(), data.token);
     setCurrentToken(data.token);
     setCurrentAccessLink(`${window.location.origin}/sessions?t=${data.token}`);
+    await refreshCurrentClubToken();
+    if (data.warningMessage) {
+      setRotationError(data.warningMessage);
+    }
     setIsRotating(false);
   };
 
@@ -375,6 +562,28 @@ export default function AdminPage() {
           }`}
         >
           Automation
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("emails")}
+          className={`rounded-full px-4 py-2 text-sm font-semibold ${
+            activeTab === "emails"
+              ? "bg-emerald-500 text-slate-900"
+              : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
+          }`}
+        >
+          Email Preview
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("gmail")}
+          className={`rounded-full px-4 py-2 text-sm font-semibold ${
+            activeTab === "gmail"
+              ? "bg-emerald-500 text-slate-900"
+              : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
+          }`}
+        >
+          Gmail Config
         </button>
       </nav>
 
@@ -549,7 +758,7 @@ export default function AdminPage() {
           <div className="card md:col-span-2">
             <h3 className="text-lg font-semibold">Current Access Link</h3>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
-              This is the access link built from the token currently stored in this browser.
+              This access link is built from the current token stored in Supabase.
             </p>
             {clubMessage ? <p className="mt-3 text-sm text-slate-500">{clubMessage}</p> : null}
             {currentAccessLink ? (
@@ -571,9 +780,21 @@ export default function AdminPage() {
                 </div>
               </div>
             ) : (
-              <p className="mt-4 text-sm text-slate-500 dark:text-slate-300">
-                No token found in local storage for this browser yet.
-              </p>
+              <div className="mt-4 grid gap-3">
+                <p className="text-sm text-slate-500 dark:text-slate-300">
+                  No token found in Supabase yet. Rotate once to create one.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={copyCurrentAccessLink}
+                    disabled
+                    className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-50"
+                  >
+                    Copy Current Link
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </section>
@@ -674,6 +895,193 @@ export default function AdminPage() {
                     {error.received_at ? (
                       <p className="mt-1 text-xs text-slate-400">{new Date(error.received_at).toLocaleString()}</p>
                     ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "gmail" ? (
+        <section className="mt-8 grid gap-6">
+          <div className="card">
+            <h2 className="text-2xl font-semibold">Gmail OAuth Config</h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
+              Stored in Supabase table <code>gmail_oauth_config</code> (row <code>id=1</code>).
+            </p>
+            {gmailConfigMessage ? <p className="mt-3 text-sm text-slate-500">{gmailConfigMessage}</p> : null}
+            <p className="mt-1 text-xs text-slate-400">Source: {gmailConfigSource}</p>
+            {gmailUpdatedAt ? (
+              <p className="mt-1 text-xs text-slate-400">Last updated: {new Date(gmailUpdatedAt).toLocaleString()}</p>
+            ) : null}
+
+            {loadingGmailConfig ? (
+              <p className="mt-4 text-sm text-slate-500">Loading config...</p>
+            ) : (
+              <div className="mt-4 grid gap-4">
+                <label className="text-sm font-semibold">
+                  Client ID
+                  <input
+                    type="text"
+                    value={gmailClientId}
+                    onChange={(event) => setGmailClientId(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                    placeholder="Google OAuth client id"
+                  />
+                </label>
+                <label className="text-sm font-semibold">
+                  Client Secret
+                  <input
+                    type="text"
+                    value={gmailClientSecret}
+                    onChange={(event) => setGmailClientSecret(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                    placeholder="Google OAuth client secret"
+                  />
+                </label>
+                <label className="text-sm font-semibold">
+                  Refresh Token
+                  <textarea
+                    value={gmailRefreshToken}
+                    onChange={(event) => setGmailRefreshToken(event.target.value)}
+                    rows={4}
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                    placeholder="Google OAuth refresh token"
+                  />
+                </label>
+              </div>
+            )}
+
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={saveGmailConfig}
+                disabled={loadingGmailConfig || savingGmailConfig}
+                className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"
+              >
+                {savingGmailConfig ? "Saving..." : "Save Gmail Config"}
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "emails" ? (
+        <section className="mt-8 grid gap-6">
+          <div className="card">
+            <h2 className="text-2xl font-semibold">Fetched Email Content</h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
+              Preview receipt content fetched by the Gmail function before parsing.
+            </p>
+            {emailPreviewMessage ? <p className="mt-3 text-sm text-slate-500">{emailPreviewMessage}</p> : null}
+            <div className="mt-4 min-w-0 grid gap-3 md:grid-cols-[minmax(0,2fr)_auto] md:items-end">
+              <label className="text-sm font-semibold">
+                Gmail Query Override (optional)
+                <input
+                  type="text"
+                  value={previewQueryInput}
+                  onChange={(event) => setPreviewQueryInput(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                  placeholder='newer_than:7d subject:"Playtomic" subject:"Receipt"'
+                />
+              </label>
+              <button
+                type="button"
+                onClick={loadEmailPreview}
+                disabled={loadingEmailPreview}
+                className="md:justify-self-start rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"
+              >
+                {loadingEmailPreview ? "Loading..." : "Load Email Content"}
+              </button>
+            </div>
+            {emailPreview ? (
+              <div className="mt-4 min-w-0 rounded-2xl border border-slate-200/80 p-4 text-sm dark:border-ink-700/60">
+                <p>
+                  <span className="font-semibold">Query:</span> {emailPreview.query ?? "-"}
+                </p>
+                <p className="mt-1">
+                  <span className="font-semibold">Timezone:</span> {emailPreview.timezone ?? "-"}
+                </p>
+                <p className="mt-1">
+                  <span className="font-semibold">Messages:</span> {emailPreview.messages.length}
+                </p>
+                <label className="mt-3 block text-sm font-semibold">
+                  Status Filter
+                  <select
+                    value={emailStatusFilter}
+                    onChange={(event) => setEmailStatusFilter(event.target.value as typeof emailStatusFilter)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800 md:max-w-xs"
+                  >
+                    <option value="ALL">All</option>
+                    <option value="SESSION_CREATED">Session Created</option>
+                    <option value="PARSE_FAILED">Parse Failed</option>
+                    <option value="NOT_INGESTED">Not Ingested</option>
+                    <option value="INGESTED_NO_SESSION">Ingested, No Session</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="card">
+            <h3 className="text-lg font-semibold">Email Bodies</h3>
+            {loadingEmailPreview ? (
+              <p className="mt-4 text-sm text-slate-500">Loading email content...</p>
+            ) : !emailPreview ? (
+              <p className="mt-4 text-sm text-slate-500">Run preview to inspect fetched emails.</p>
+            ) : filteredEmailPreviewMessages.length === 0 ? (
+              <p className="mt-4 text-sm text-slate-500">No matching messages found.</p>
+            ) : (
+              <ul className="mt-4 space-y-4">
+                {filteredEmailPreviewMessages.map((message) => (
+                  <li key={message.id} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200/80 p-4 dark:border-ink-700/60">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="break-all font-semibold">{message.id}</p>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          message.status === "SESSION_CREATED"
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
+                            : message.status === "PARSE_FAILED"
+                            ? "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200"
+                            : message.status === "INGESTED_NO_SESSION"
+                            ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
+                            : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-100"
+                        }`}
+                      >
+                        {message.status === "SESSION_CREATED"
+                          ? "Session Created"
+                          : message.status === "PARSE_FAILED"
+                          ? "Parse Failed"
+                          : message.status === "INGESTED_NO_SESSION"
+                          ? "Ingested, No Session"
+                          : "Not Ingested"}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-400">
+                      text={message.textLength}
+                      {message.textTruncated ? " (truncated)" : ""} | html={message.htmlLength}
+                      {message.htmlTruncated ? " (truncated)" : ""}
+                    </p>
+                    {message.parsedSessionDate ? (
+                      <p className="mt-1 text-xs text-slate-400">
+                        date={message.parsedSessionDate}
+                        {message.sessionStatus ? ` | session=${message.sessionStatus}` : ""}
+                      </p>
+                    ) : null}
+                    {message.parseError ? <p className="mt-1 text-xs text-rose-500">{message.parseError}</p> : null}
+                    <details className="mt-3 min-w-0">
+                      <summary className="cursor-pointer text-sm font-semibold">Text Body</summary>
+                      <pre className="mt-2 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-xl border border-slate-200/80 bg-slate-100 p-3 text-xs dark:border-ink-700/60 dark:bg-ink-900/40">
+                        {message.rawText ?? "(empty)"}
+                      </pre>
+                    </details>
+                    <details className="mt-3 min-w-0">
+                      <summary className="cursor-pointer text-sm font-semibold">HTML Body (raw)</summary>
+                      <pre className="mt-2 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-xl border border-slate-200/80 bg-slate-100 p-3 text-xs dark:border-ink-700/60 dark:bg-ink-900/40">
+                        {message.rawHtml ?? "(empty)"}
+                      </pre>
+                    </details>
                   </li>
                 ))}
               </ul>

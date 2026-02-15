@@ -75,6 +75,12 @@
 - [x] Add Vitest coverage for admin session cookie signing and token hashing (required by MVP).
 - [x] Add admin session cookie signing tests.
 - [x] Add token hashing helper tests.
+- [x] Add automation settings model for receipt keyword filters + timezone.
+- [x] Add dedicated automation secret auth for ingestion endpoints.
+- [x] Add daily scheduler workflow (GitHub Actions) for `run-ingestion`.
+- [x] Add admin automation controls (keyword config + manual run + parse failure queue).
+- [x] Add ingestion aggregation logic for same-day receipts (sum fee + deterministic courts).
+- [x] Add unit tests for automation auth, query builder, timezone conversion, and aggregation.
 
 ## MVP (Current)
 - [x] Admin login with signed httpOnly cookie.

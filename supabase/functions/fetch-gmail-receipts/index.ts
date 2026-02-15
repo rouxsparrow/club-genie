@@ -1,32 +1,21 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { isAutomationSecretValid } from "../_shared/automation-auth.ts";
+import {
+  buildGmailQueryFromKeywords,
+  ingestionDefaults,
+  normalizeSubjectKeywords
+} from "../_shared/ingestion-utils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, x-club-token, content-type"
+  "Access-Control-Allow-Headers": "authorization, apikey, x-club-token, x-automation-secret, content-type"
 };
 
-const encoder = new TextEncoder();
-
-function toHex(buffer: ArrayBuffer) {
-  return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function timingSafeEqual(a: string, b: string) {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}
-
-async function hashToken(token: string) {
-  const data = encoder.encode(token);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return toHex(digest);
-}
+type GmailTokenResponse = {
+  access_token: string;
+  expires_in: number;
+  token_type: string;
+};
 
 async function getSupabaseClient() {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -41,28 +30,20 @@ async function getSupabaseClient() {
   });
 }
 
-async function validateClubToken(supabase: ReturnType<typeof createClient>, token: string) {
-  const { data, error } = await supabase
-    .from("club_settings")
-    .select("token_hash")
-    .order("token_version", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
+async function getAutomationSettings(supabase: ReturnType<typeof createClient>) {
+  const { data } = await supabase
+    .from("automation_settings")
+    .select("subject_keywords, timezone, enabled")
+    .eq("id", 1)
     .maybeSingle();
 
-  if (error || !data?.token_hash) {
-    return false;
-  }
-
-  const incomingHash = await hashToken(token);
-  return timingSafeEqual(incomingHash, data.token_hash);
+  return {
+    subjectKeywords: normalizeSubjectKeywords(data?.subject_keywords),
+    timezone:
+      typeof data?.timezone === "string" && data.timezone.trim() ? data.timezone : ingestionDefaults.timezone,
+    enabled: typeof data?.enabled === "boolean" ? data.enabled : true
+  };
 }
-
-type GmailTokenResponse = {
-  access_token: string;
-  expires_in: number;
-  token_type: string;
-};
 
 async function getGmailAccessToken() {
   const clientId = Deno.env.get("GMAIL_CLIENT_ID");
@@ -123,7 +104,11 @@ async function fetchGmailMessage(accessToken: string, messageId: string) {
     payload?: {
       mimeType?: string;
       body?: { data?: string };
-      parts?: Array<{ mimeType?: string; body?: { data?: string }; parts?: Array<{ mimeType?: string; body?: { data?: string } }> }>;
+      parts?: Array<{
+        mimeType?: string;
+        body?: { data?: string };
+        parts?: Array<{ mimeType?: string; body?: { data?: string } }>;
+      }>;
     };
     snippet?: string;
   };
@@ -139,7 +124,11 @@ function decodeBody(data?: string) {
 function findHtmlPart(payload?: {
   mimeType?: string;
   body?: { data?: string };
-  parts?: Array<{ mimeType?: string; body?: { data?: string }; parts?: Array<{ mimeType?: string; body?: { data?: string } }> }>;
+  parts?: Array<{
+    mimeType?: string;
+    body?: { data?: string };
+    parts?: Array<{ mimeType?: string; body?: { data?: string } }>;
+  }>;
 }): string | null {
   if (!payload) return null;
   if (payload.mimeType === "text/html" && payload.body?.data) {
@@ -164,7 +153,11 @@ function findHtmlPart(payload?: {
 function findTextPart(payload?: {
   mimeType?: string;
   body?: { data?: string };
-  parts?: Array<{ mimeType?: string; body?: { data?: string }; parts?: Array<{ mimeType?: string; body?: { data?: string } }> }>;
+  parts?: Array<{
+    mimeType?: string;
+    body?: { data?: string };
+    parts?: Array<{ mimeType?: string; body?: { data?: string } }>;
+  }>;
 }): string | null {
   if (!payload) return null;
   if (payload.mimeType === "text/plain" && payload.body?.data) {
@@ -191,9 +184,10 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const token = req.headers.get("x-club-token")?.trim();
-  if (!token) {
-    return new Response(JSON.stringify({ ok: false }), {
+  const providedSecret = req.headers.get("x-automation-secret")?.trim() ?? null;
+  const expectedSecret = Deno.env.get("AUTOMATION_SECRET");
+  if (!isAutomationSecretValid(expectedSecret, providedSecret)) {
+    return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
       status: 403,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
@@ -201,22 +195,25 @@ Deno.serve(async (req) => {
 
   const supabase = await getSupabaseClient();
   if (!supabase) {
-    return new Response(JSON.stringify({ ok: false }), {
+    return new Response(JSON.stringify({ ok: false, error: "missing_supabase_service_role" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
 
-  const valid = await validateClubToken(supabase, token);
-  if (!valid) {
-    return new Response(JSON.stringify({ ok: false }), {
-      status: 403,
+  const settings = await getAutomationSettings(supabase);
+  if (!settings.enabled) {
+    return new Response(JSON.stringify({ ok: true, messages: [], skipped: true }), {
+      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
 
-  const body = await req.json().catch(() => null);
-  const query = body?.query ?? 'subject:(Receipt Playtomic)';
+  const body = (await req.json().catch(() => null)) as { query?: string } | null;
+  const query =
+    typeof body?.query === "string" && body.query.trim()
+      ? body.query.trim()
+      : buildGmailQueryFromKeywords(settings.subjectKeywords);
 
   try {
     const { access_token } = await getGmailAccessToken();
@@ -231,7 +228,7 @@ Deno.serve(async (req) => {
       messages.push({ id: message.id, rawHtml, rawText });
     }
 
-    return new Response(JSON.stringify({ ok: true, messages }), {
+    return new Response(JSON.stringify({ ok: true, messages, query, timezone: settings.timezone }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });

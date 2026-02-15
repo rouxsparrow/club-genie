@@ -4,6 +4,7 @@
 - Least-privilege API access.
 - Admin-only actions for session edits, closures, and Splitwise operations.
 - Store OAuth and API tokens in environment variables.
+- Separate machine auth (`AUTOMATION_SECRET`) from rotating club invite token.
 
 ## Data Handling
 - Store Gmail `messageId` for deduplication only.

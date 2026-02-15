@@ -17,6 +17,6 @@ Required env vars (Supabase secrets):
 3) Exchange authorization code for refresh token.
 
 ## Cron Hook
-- Schedule calls to `fetch-gmail-receipts` 5x/day.
-- This function currently returns Gmail message IDs and snippets.
-- Next step: map message IDs to full raw HTML payload and call `ingest-receipts`.
+- Schedule calls to `run-ingestion` once daily at 23:30 SGT (15:30 UTC).
+- Scheduler can be implemented via GitHub Actions using `x-automation-secret`.
+- Admin can run ingestion manually from the web app Automation tab.

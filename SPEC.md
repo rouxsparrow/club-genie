@@ -20,10 +20,12 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 
 ## Functional Requirements
 - Ingest Playtomic receipts via Gmail API (read-only) using HTML/body parsing.
+- Receipt subject keyword matching is configurable by admin (default: `Playtomic`, `Receipt`).
 - Deduplicate receipts by Gmail `messageId` stored in the database.
 - Create one Session per calendar day; Session time spans earliest start to latest end.
 - Sessions can contain multiple courts/time slots from a single receipt.
-- On parse failure, create a DRAFT session and notify admin by email.
+- Multiple receipts on the same `session_date` are aggregated into one session (sum fees, merge/dedupe courts).
+- On parse failure, create a DRAFT session and notify admin via in-app admin error queue.
 - Public users can join or withdraw from OPEN sessions, including multi-player registration.
 - Admin can edit session details and fix DRAFT sessions.
 - Admin can manage players (add, rename, deactivate/reactivate).
@@ -38,6 +40,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Store only a hashed token in `club_settings.token_hash` (never raw token).
 - Admin can rotate the token via Edge Function to invalidate prior links.
 - Admin login uses a signed httpOnly cookie (`admin_session`) with HMAC.
+- Scheduled ingestion uses a dedicated machine secret (`AUTOMATION_SECRET`), separate from the club invite token.
 
 ### Token Setup (Admin)
 1. Generate a token: `openssl rand -hex 24`
@@ -53,6 +56,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 ## Acceptance Criteria
 - Scheduled cron jobs create/update sessions from new receipts.
 - Failed parses create DRAFT sessions and send admin notifications.
+- Parse failures are visible in the in-app admin error queue.
 - Public registration flows allow join/withdraw for multiple players.
 - Admin actions are restricted and audited for session edits and closures.
 - Splitwise expenses are recorded once per session and retries are safe.

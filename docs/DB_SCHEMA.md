@@ -2,6 +2,7 @@
 
 ## Tables
 - club_settings: one row per token rotation.
+- automation_settings: singleton ingestion configuration (keywords/timezone/enabled).
 - sessions: one per calendar day (unique `session_date`).
 - courts: time slots per session.
 - players: predefined player roster.
@@ -16,3 +17,8 @@
 
 ## Status
 - sessions.status: DRAFT | OPEN | CLOSED
+
+## Receipt Parse Metadata
+- email_receipts.parsed_session_date: normalized session date used for aggregation.
+- email_receipts.parsed_total_fee: parsed receipt fee.
+- email_receipts.parsed_courts: parsed courts JSON used to rebuild deterministic session courts.

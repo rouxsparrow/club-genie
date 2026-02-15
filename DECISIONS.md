@@ -31,6 +31,12 @@
 - Rationale: Simplifies access control and reduces link sprawl while keeping write operations centralized.
 - Note: Store the token hashed in the database.
 
+## ADR-0006: Use Daily GitHub Actions Scheduler + Dedicated Automation Secret for Gmail Ingestion
+- Date: 2026-02-15
+- Status: Accepted
+- Decision: Run receipt ingestion once daily at 23:30 SGT (15:30 UTC) via GitHub Actions cron calling `run-ingestion`. Authenticate scheduler and admin manual ingestion with `AUTOMATION_SECRET` instead of the rotating club invite token.
+- Rationale: Keeps automation stable when club tokens rotate, provides auditable runs/reruns on free tier, and matches end-of-day SLA.
+
 ## Pending Decisions
 - Player identity model (predefined list vs free-text vs hybrid).
 - Admin access control (magic link vs password vs secret URL).

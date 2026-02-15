@@ -1,32 +1,33 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { isAutomationSecretValid } from "../_shared/automation-auth.ts";
+import {
+  buildGmailQueryFromKeywords,
+  ingestionDefaults,
+  normalizeSubjectKeywords
+} from "../_shared/ingestion-utils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, x-club-token, content-type"
+  "Access-Control-Allow-Headers": "authorization, apikey, x-club-token, x-automation-secret, content-type"
 };
 
-const encoder = new TextEncoder();
+type AutomationSettings = {
+  subjectKeywords: string[];
+  timezone: string;
+  enabled: boolean;
+};
 
-function toHex(buffer: ArrayBuffer) {
-  return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
+type GmailTokenResponse = {
+  access_token: string;
+  expires_in: number;
+  token_type: string;
+};
 
-function timingSafeEqual(a: string, b: string) {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}
-
-async function hashToken(token: string) {
-  const data = encoder.encode(token);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return toHex(digest);
-}
+type IngestOutcome = {
+  ok: boolean;
+  deduped: boolean;
+  parseFailed: boolean;
+};
 
 async function getSupabaseClient() {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -41,120 +42,20 @@ async function getSupabaseClient() {
   });
 }
 
-async function validateClubToken(supabase: ReturnType<typeof createClient>, token: string) {
-  const { data, error } = await supabase
-    .from("club_settings")
-    .select("token_hash")
-    .order("token_version", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
+async function getAutomationSettings(supabase: ReturnType<typeof createClient>): Promise<AutomationSettings> {
+  const { data } = await supabase
+    .from("automation_settings")
+    .select("subject_keywords, timezone, enabled")
+    .eq("id", 1)
     .maybeSingle();
 
-  if (error || !data?.token_hash) {
-    return false;
-  }
-
-  const incomingHash = await hashToken(token);
-  return timingSafeEqual(incomingHash, data.token_hash);
-}
-
-async function exchangeGmailMessages(accessToken: string, query: string) {
-  const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
-  url.searchParams.set("q", query);
-
-  const response = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-
-  if (!response.ok) {
-    throw new Error("gmail_list_failed");
-  }
-
-  return (await response.json()) as { messages?: Array<{ id: string }> };
-}
-
-async function fetchMessage(accessToken: string, messageId: string) {
-  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`;
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-
-  if (!response.ok) {
-    throw new Error("gmail_fetch_failed");
-  }
-
-  return (await response.json()) as {
-    id: string;
-    payload?: {
-      mimeType?: string;
-      body?: { data?: string };
-      parts?: Array<{ mimeType?: string; body?: { data?: string }; parts?: Array<{ mimeType?: string; body?: { data?: string } }> }>;
-    };
+  return {
+    subjectKeywords: normalizeSubjectKeywords(data?.subject_keywords),
+    timezone:
+      typeof data?.timezone === "string" && data.timezone.trim() ? data.timezone : ingestionDefaults.timezone,
+    enabled: typeof data?.enabled === "boolean" ? data.enabled : true
   };
 }
-
-function decodeBody(data?: string) {
-  if (!data) return null;
-  const normalized = data.replace(/-/g, "+").replace(/_/g, "/");
-  const bytes = Uint8Array.from(atob(normalized), (c) => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
-
-function findHtmlPart(payload?: {
-  mimeType?: string;
-  body?: { data?: string };
-  parts?: Array<{ mimeType?: string; body?: { data?: string }; parts?: Array<{ mimeType?: string; body?: { data?: string } }> }>;
-}) {
-  if (!payload) return null;
-  if (payload.mimeType === "text/html" && payload.body?.data) {
-    return decodeBody(payload.body.data);
-  }
-
-  const stack = [...(payload.parts ?? [])];
-  while (stack.length > 0) {
-    const part = stack.shift();
-    if (!part) continue;
-    if (part.mimeType === "text/html" && part.body?.data) {
-      return decodeBody(part.body.data);
-    }
-    if (part.parts) {
-      stack.push(...part.parts);
-    }
-  }
-
-  return null;
-}
-
-function findTextPart(payload?: {
-  mimeType?: string;
-  body?: { data?: string };
-  parts?: Array<{ mimeType?: string; body?: { data?: string }; parts?: Array<{ mimeType?: string; body?: { data?: string } }> }>;
-}) {
-  if (!payload) return null;
-  if (payload.mimeType === "text/plain" && payload.body?.data) {
-    return decodeBody(payload.body.data);
-  }
-
-  const stack = [...(payload.parts ?? [])];
-  while (stack.length > 0) {
-    const part = stack.shift();
-    if (!part) continue;
-    if (part.mimeType === "text/plain" && part.body?.data) {
-      return decodeBody(part.body.data);
-    }
-    if (part.parts) {
-      stack.push(...part.parts);
-    }
-  }
-
-  return null;
-}
-
-type GmailTokenResponse = {
-  access_token: string;
-  expires_in: number;
-  token_type: string;
-};
 
 async function getGmailAccessToken() {
   const clientId = Deno.env.get("GMAIL_CLIENT_ID");
@@ -185,27 +86,154 @@ async function getGmailAccessToken() {
   return (await response.json()) as GmailTokenResponse;
 }
 
+async function listGmailMessages(accessToken: string, query: string) {
+  const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
+  url.searchParams.set("q", query);
+
+  const response = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  if (!response.ok) {
+    throw new Error("gmail_list_failed");
+  }
+
+  return (await response.json()) as { messages?: Array<{ id: string }> };
+}
+
+async function fetchMessage(accessToken: string, messageId: string) {
+  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  if (!response.ok) {
+    throw new Error("gmail_fetch_failed");
+  }
+
+  return (await response.json()) as {
+    id: string;
+    payload?: {
+      mimeType?: string;
+      body?: { data?: string };
+      parts?: Array<{
+        mimeType?: string;
+        body?: { data?: string };
+        parts?: Array<{ mimeType?: string; body?: { data?: string } }>;
+      }>;
+    };
+  };
+}
+
+function decodeBody(data?: string) {
+  if (!data) return null;
+  const normalized = data.replace(/-/g, "+").replace(/_/g, "/");
+  const bytes = Uint8Array.from(atob(normalized), (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+function findHtmlPart(payload?: {
+  mimeType?: string;
+  body?: { data?: string };
+  parts?: Array<{
+    mimeType?: string;
+    body?: { data?: string };
+    parts?: Array<{ mimeType?: string; body?: { data?: string } }>;
+  }>;
+}) {
+  if (!payload) return null;
+  if (payload.mimeType === "text/html" && payload.body?.data) {
+    return decodeBody(payload.body.data);
+  }
+
+  const stack = [...(payload.parts ?? [])];
+  while (stack.length > 0) {
+    const part = stack.shift();
+    if (!part) continue;
+    if (part.mimeType === "text/html" && part.body?.data) {
+      return decodeBody(part.body.data);
+    }
+    if (part.parts) {
+      stack.push(...part.parts);
+    }
+  }
+
+  return null;
+}
+
+function findTextPart(payload?: {
+  mimeType?: string;
+  body?: { data?: string };
+  parts?: Array<{
+    mimeType?: string;
+    body?: { data?: string };
+    parts?: Array<{ mimeType?: string; body?: { data?: string } }>;
+  }>;
+}) {
+  if (!payload) return null;
+  if (payload.mimeType === "text/plain" && payload.body?.data) {
+    return decodeBody(payload.body.data);
+  }
+
+  const stack = [...(payload.parts ?? [])];
+  while (stack.length > 0) {
+    const part = stack.shift();
+    if (!part) continue;
+    if (part.mimeType === "text/plain" && part.body?.data) {
+      return decodeBody(part.body.data);
+    }
+    if (part.parts) {
+      stack.push(...part.parts);
+    }
+  }
+
+  return null;
+}
+
 async function callIngestReceipts(
   supabaseUrl: string,
   anonKey: string,
-  clubToken: string,
+  automationSecret: string,
   messageId: string,
   rawHtml: string,
-  rawText?: string | null
-) {
+  rawText: string | null,
+  timezone: string
+): Promise<IngestOutcome> {
   const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/ingest-receipts`;
   const response = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${anonKey}`,
       apikey: anonKey,
-      "x-club-token": clubToken,
+      "x-automation-secret": automationSecret,
       "content-type": "application/json"
     },
-    body: JSON.stringify({ messageId, rawHtml, rawText })
+    body: JSON.stringify({ messageId, rawHtml, rawText, timezone })
   });
 
-  return response.ok;
+  const data = (await response.json().catch(() => null)) as { deduped?: boolean; error?: string } | null;
+
+  if (response.ok) {
+    return {
+      ok: true,
+      deduped: Boolean(data?.deduped),
+      parseFailed: false
+    };
+  }
+
+  if (response.status === 422 && data?.error === "parse_failed") {
+    return {
+      ok: false,
+      deduped: false,
+      parseFailed: true
+    };
+  }
+
+  return {
+    ok: false,
+    deduped: false,
+    parseFailed: false
+  };
 }
 
 Deno.serve(async (req) => {
@@ -213,18 +241,20 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const token = req.headers.get("x-club-token")?.trim();
-  if (!token) {
-    return new Response(JSON.stringify({ ok: false }), {
+  const providedSecret = req.headers.get("x-automation-secret")?.trim() ?? null;
+  const expectedSecret = Deno.env.get("AUTOMATION_SECRET");
+  if (!isAutomationSecretValid(expectedSecret, providedSecret)) {
+    return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
       status: 403,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
+  const automationSecret = providedSecret as string;
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   if (!supabaseUrl || !anonKey) {
-    return new Response(JSON.stringify({ ok: false }), {
+    return new Response(JSON.stringify({ ok: false, error: "missing_supabase_config" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
@@ -232,43 +262,87 @@ Deno.serve(async (req) => {
 
   const supabase = await getSupabaseClient();
   if (!supabase) {
-    return new Response(JSON.stringify({ ok: false }), {
+    return new Response(JSON.stringify({ ok: false, error: "missing_supabase_service_role" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
 
-  const valid = await validateClubToken(supabase, token);
-  if (!valid) {
-    return new Response(JSON.stringify({ ok: false }), {
-      status: 403,
-      headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
+  const settings = await getAutomationSettings(supabase);
+  if (!settings.enabled) {
+    return new Response(
+      JSON.stringify({ ok: true, total: 0, ingested: 0, deduped: 0, parse_failed: 0, fetch_failed: 0, skipped: true }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      }
+    );
   }
 
-  const query = (await req.json().catch(() => null))?.query ?? 'subject:(Receipt Playtomic)';
+  const requestBody = (await req.json().catch(() => null)) as { query?: string } | null;
+  const query =
+    typeof requestBody?.query === "string" && requestBody.query.trim()
+      ? requestBody.query.trim()
+      : buildGmailQueryFromKeywords(settings.subjectKeywords);
 
   try {
     const { access_token } = await getGmailAccessToken();
-    const list = await exchangeGmailMessages(access_token, query);
+    const list = await listGmailMessages(access_token, query);
     const messageIds = list.messages?.map((message) => message.id) ?? [];
 
     let ingested = 0;
+    let deduped = 0;
+    let parseFailed = 0;
+    let fetchFailed = 0;
+
     for (const messageId of messageIds) {
-      const message = await fetchMessage(access_token, messageId);
-      const rawHtml = findHtmlPart(message.payload);
-      const rawText = findTextPart(message.payload);
-      if (!rawHtml && !rawText) {
-        continue;
+      try {
+        const message = await fetchMessage(access_token, messageId);
+        const rawHtml = findHtmlPart(message.payload);
+        const rawText = findTextPart(message.payload);
+        if (!rawHtml && !rawText) {
+          fetchFailed += 1;
+          continue;
+        }
+
+        const outcome = await callIngestReceipts(
+          supabaseUrl,
+          anonKey,
+          automationSecret,
+          messageId,
+          rawHtml ?? "",
+          rawText,
+          settings.timezone
+        );
+
+        if (outcome.deduped) {
+          deduped += 1;
+        } else if (outcome.ok) {
+          ingested += 1;
+        } else if (outcome.parseFailed) {
+          parseFailed += 1;
+        } else {
+          fetchFailed += 1;
+        }
+      } catch {
+        fetchFailed += 1;
       }
-      const ok = await callIngestReceipts(supabaseUrl, anonKey, token, messageId, rawHtml ?? "", rawText);
-      if (ok) ingested += 1;
     }
 
-    return new Response(JSON.stringify({ ok: true, ingested, total: messageIds.length }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        total: messageIds.length,
+        ingested,
+        deduped,
+        parse_failed: parseFailed,
+        fetch_failed: fetchFailed
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      }
+    );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "ingestion_failed";
     return new Response(JSON.stringify({ ok: false, error: errorMessage }), {

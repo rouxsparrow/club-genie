@@ -13,9 +13,13 @@
 - On parse failure, a DRAFT session is created and admin is notified by email.
 
 ## Cron-Based Automation Model
-- Five identical ingestion cron jobs at 10:00, 13:00, 16:00, 19:00, 23:00.
+- One daily ingestion cron at 23:30 SGT (15:30 UTC) via GitHub Actions.
 - Each run parses unprocessed receipts and creates/updates the session for the calendar day.
 - One closing cron at 23:00 handles session completion and Splitwise recording.
+
+## Automation Authentication Boundary
+- Cron/manual ingestion uses `AUTOMATION_SECRET` (machine auth), not the rotating club invite token.
+- Public read/write flows continue to require `x-club-token`.
 
 ## Splitwise Integration Boundary
 - Session closing triggers a Splitwise expense with equal split, admin as payer.

@@ -34,6 +34,10 @@ Parse Playtomic email receipts into a normalized session payload. This contract 
 - Session end_time = latest court endTime.
 - If a receipt contains multiple courts/time slots, all are included.
 - `totalFee` should parse from receipt summary (currency ignored for now).
+- Times are normalized using `Asia/Singapore`.
+- Multiple successful receipts for one `sessionDate` are aggregated:
+  - `sessions.total_fee` = sum of receipt fees
+  - courts are rebuilt deterministically by unique `(court_label, start_time, end_time)`.
 
 ## Failure Handling
 - If required fields are missing or parsing fails:

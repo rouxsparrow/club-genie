@@ -6,7 +6,7 @@ import AdminNavbar from "../../components/admin-navbar";
 import ThemeToggle from "../../components/theme-toggle";
 import { getClubTokenStorageKey } from "../../lib/edge";
 
-type TabKey = "players" | "club";
+type TabKey = "players" | "club" | "automation";
 
 type Player = {
   id: string;
@@ -18,6 +18,21 @@ type PlayersResponse = {
   ok: boolean;
   players?: Player[];
   error?: string;
+};
+
+type AutomationSettings = {
+  id: number;
+  subject_keywords: string[];
+  timezone: string;
+  enabled: boolean;
+  updated_at: string | null;
+};
+
+type ReceiptError = {
+  id: string;
+  gmail_message_id: string;
+  parse_error: string | null;
+  received_at: string | null;
 };
 
 export default function AdminPage() {
@@ -33,6 +48,20 @@ export default function AdminPage() {
   const [isRotating, setIsRotating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [rotationError, setRotationError] = useState<string | null>(null);
+  const [automationSettings, setAutomationSettings] = useState<AutomationSettings | null>(null);
+  const [keywordsInput, setKeywordsInput] = useState("");
+  const [loadingAutomation, setLoadingAutomation] = useState(true);
+  const [automationMessage, setAutomationMessage] = useState<string | null>(null);
+  const [runningIngestion, setRunningIngestion] = useState(false);
+  const [runSummary, setRunSummary] = useState<{
+    total: number;
+    ingested: number;
+    deduped: number;
+    parse_failed: number;
+    fetch_failed: number;
+  } | null>(null);
+  const [receiptErrors, setReceiptErrors] = useState<ReceiptError[]>([]);
+  const [loadingReceiptErrors, setLoadingReceiptErrors] = useState(true);
   const [currentToken, setCurrentToken] = useState<string | null>(null);
   const [currentAccessLink, setCurrentAccessLink] = useState<string | null>(null);
   const [clubMessage, setClubMessage] = useState<string | null>(null);
@@ -48,21 +77,43 @@ export default function AdminPage() {
       setCurrentAccessLink(`${window.location.origin}/sessions?t=${token}`);
     }
     let isMounted = true;
-    fetch("/api/admin/players", { credentials: "include" })
-      .then((response) => response.json())
-      .then((data: PlayersResponse) => {
+    Promise.all([
+      fetch("/api/admin/players", { credentials: "include" }).then((response) => response.json()),
+      fetch("/api/admin/automation-settings", { credentials: "include" }).then((response) => response.json()),
+      fetch("/api/admin/receipt-errors", { credentials: "include" }).then((response) => response.json())
+    ])
+      .then(([playersData, settingsData, errorsData]) => {
         if (!isMounted) return;
-        if (data.ok) {
-          setPlayers(data.players ?? []);
+        const playersPayload = playersData as PlayersResponse;
+        if (playersPayload.ok) {
+          setPlayers(playersPayload.players ?? []);
         } else {
-          setPlayersError(data.error ?? "Failed to load players.");
+          setPlayersError(playersPayload.error ?? "Failed to load players.");
         }
         setLoadingPlayers(false);
+
+        const settingsPayload = settingsData as { ok: boolean; settings?: AutomationSettings };
+        if (settingsPayload.ok && settingsPayload.settings) {
+          setAutomationSettings(settingsPayload.settings);
+          setKeywordsInput((settingsPayload.settings.subject_keywords ?? []).join(", "));
+        } else {
+          setAutomationMessage("Failed to load automation settings.");
+        }
+        setLoadingAutomation(false);
+
+        const errorsPayload = errorsData as { ok: boolean; errors?: ReceiptError[] };
+        if (errorsPayload.ok) {
+          setReceiptErrors(errorsPayload.errors ?? []);
+        }
+        setLoadingReceiptErrors(false);
       })
       .catch(() => {
         if (!isMounted) return;
         setPlayersError("Failed to load players.");
         setLoadingPlayers(false);
+        setAutomationMessage("Failed to load automation settings.");
+        setLoadingAutomation(false);
+        setLoadingReceiptErrors(false);
       });
     return () => {
       isMounted = false;
@@ -80,6 +131,90 @@ export default function AdminPage() {
       setPlayersError(data.error ?? "Failed to load players.");
     }
     setLoadingPlayers(false);
+  };
+
+  const refreshAutomationSettings = async () => {
+    setLoadingAutomation(true);
+    const response = await fetch("/api/admin/automation-settings", { credentials: "include" });
+    const data = (await response.json()) as { ok: boolean; settings?: AutomationSettings; error?: string };
+    if (!data.ok || !data.settings) {
+      setAutomationMessage(data.error ?? "Failed to load automation settings.");
+      setLoadingAutomation(false);
+      return;
+    }
+    setAutomationSettings(data.settings);
+    setKeywordsInput((data.settings.subject_keywords ?? []).join(", "));
+    setLoadingAutomation(false);
+  };
+
+  const refreshReceiptErrors = async () => {
+    setLoadingReceiptErrors(true);
+    const response = await fetch("/api/admin/receipt-errors", { credentials: "include" });
+    const data = (await response.json()) as { ok: boolean; errors?: ReceiptError[] };
+    if (data.ok) {
+      setReceiptErrors(data.errors ?? []);
+    }
+    setLoadingReceiptErrors(false);
+  };
+
+  const saveAutomationSettings = async () => {
+    const keywords = keywordsInput
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    if (keywords.length === 0) {
+      setAutomationMessage("Provide at least one subject keyword.");
+      return;
+    }
+
+    const response = await fetch("/api/admin/automation-settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ subjectKeywords: keywords })
+    });
+    const data = (await response.json()) as { ok: boolean; settings?: AutomationSettings; error?: string };
+    if (!data.ok || !data.settings) {
+      setAutomationMessage(data.error ?? "Failed to save settings.");
+      return;
+    }
+    setAutomationSettings(data.settings);
+    setKeywordsInput((data.settings.subject_keywords ?? []).join(", "));
+    setAutomationMessage("Automation settings saved.");
+  };
+
+  const runIngestionNow = async () => {
+    setRunningIngestion(true);
+    setAutomationMessage(null);
+    const response = await fetch("/api/admin/ingestion/run", {
+      method: "POST",
+      credentials: "include"
+    });
+    const data = (await response.json()) as {
+      ok: boolean;
+      total?: number;
+      ingested?: number;
+      deduped?: number;
+      parse_failed?: number;
+      fetch_failed?: number;
+      error?: string;
+    };
+    if (!data.ok) {
+      setAutomationMessage(data.error ?? "Ingestion run failed.");
+      setRunningIngestion(false);
+      return;
+    }
+
+    setRunSummary({
+      total: data.total ?? 0,
+      ingested: data.ingested ?? 0,
+      deduped: data.deduped ?? 0,
+      parse_failed: data.parse_failed ?? 0,
+      fetch_failed: data.fetch_failed ?? 0
+    });
+    setAutomationMessage("Ingestion run completed.");
+    setRunningIngestion(false);
+    await Promise.all([refreshReceiptErrors(), refreshAutomationSettings()]);
   };
 
   const handleAddPlayer = async () => {
@@ -229,6 +364,17 @@ export default function AdminPage() {
           }`}
         >
           Club Access
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("automation")}
+          className={`rounded-full px-4 py-2 text-sm font-semibold ${
+            activeTab === "automation"
+              ? "bg-emerald-500 text-slate-900"
+              : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
+          }`}
+        >
+          Automation
         </button>
       </nav>
 
@@ -428,6 +574,109 @@ export default function AdminPage() {
               <p className="mt-4 text-sm text-slate-500 dark:text-slate-300">
                 No token found in local storage for this browser yet.
               </p>
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "automation" ? (
+        <section className="mt-8 grid gap-6">
+          <div className="card">
+            <h2 className="text-2xl font-semibold">Receipt Ingestion</h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
+              Configure Gmail subject matching and run ingestion manually when needed.
+            </p>
+            {automationMessage ? <p className="mt-3 text-sm text-slate-500">{automationMessage}</p> : null}
+            {loadingAutomation ? (
+              <p className="mt-4 text-sm text-slate-500">Loading automation settings...</p>
+            ) : (
+              <div className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr]">
+                <label className="text-sm font-semibold">
+                  Subject Keywords (comma separated)
+                  <input
+                    type="text"
+                    value={keywordsInput}
+                    onChange={(event) => setKeywordsInput(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                    placeholder="Playtomic, Receipt"
+                  />
+                </label>
+                <label className="text-sm font-semibold">
+                  Timezone
+                  <input
+                    type="text"
+                    value={automationSettings?.timezone ?? "Asia/Singapore"}
+                    disabled
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-900/40"
+                  />
+                </label>
+              </div>
+            )}
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={saveAutomationSettings}
+                disabled={loadingAutomation}
+                className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"
+              >
+                Save Settings
+              </button>
+              <button
+                type="button"
+                onClick={runIngestionNow}
+                disabled={runningIngestion}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100 disabled:opacity-60"
+              >
+                {runningIngestion ? "Running..." : "Run Ingestion Now"}
+              </button>
+            </div>
+            {runSummary ? (
+              <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200/80 p-4 text-sm dark:border-ink-700/60 md:grid-cols-5">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Total</p>
+                  <p className="font-semibold">{runSummary.total}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Ingested</p>
+                  <p className="font-semibold">{runSummary.ingested}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Deduped</p>
+                  <p className="font-semibold">{runSummary.deduped}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Parse Failed</p>
+                  <p className="font-semibold">{runSummary.parse_failed}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Fetch Failed</p>
+                  <p className="font-semibold">{runSummary.fetch_failed}</p>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="card">
+            <h3 className="text-lg font-semibold">Parse Failures</h3>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
+              Latest receipt parse failures that require admin review.
+            </p>
+            {loadingReceiptErrors ? (
+              <p className="mt-4 text-sm text-slate-500">Loading failures...</p>
+            ) : receiptErrors.length === 0 ? (
+              <p className="mt-4 text-sm text-slate-500">No parse failures.</p>
+            ) : (
+              <ul className="mt-4 space-y-3">
+                {receiptErrors.map((error) => (
+                  <li key={error.id} className="rounded-2xl border border-slate-200/80 p-4 text-sm dark:border-ink-700/60">
+                    <p className="font-semibold">{error.gmail_message_id}</p>
+                    <p className="mt-1 text-slate-500 dark:text-slate-300">{error.parse_error ?? "parse_failed"}</p>
+                    {error.received_at ? (
+                      <p className="mt-1 text-xs text-slate-400">{new Date(error.received_at).toLocaleString()}</p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </section>

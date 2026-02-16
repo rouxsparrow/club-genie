@@ -4,7 +4,6 @@ import { Lock, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import AdminAccountsPanel from "../../components/admin-accounts-panel";
 import AdminNavbar from "../../components/admin-navbar";
-import ThemeToggle from "../../components/theme-toggle";
 
 type TabKey = "accounts" | "players" | "club" | "automation" | "emails" | "gmail" | "splitwise";
 
@@ -858,7 +857,6 @@ export default function AdminPage() {
             Manage players, access tokens, and session operations.
           </p>
         </div>
-        <ThemeToggle />
         </div>
       </header>
 

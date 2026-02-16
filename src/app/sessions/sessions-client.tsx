@@ -1,10 +1,9 @@
 "use client";
 
-import { ArrowUpDown, CalendarDays, ClipboardList, MapPin, Users2 } from "lucide-react";
+import { ArrowUpDown, CalendarDays, Clock3, DollarSign, LayoutGrid, MapPin, Rows3, Users2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminNavbar from "../../components/admin-navbar";
-import ThemeToggle from "../../components/theme-toggle";
 import {
   getClubTokenStorageKey,
   joinSession,
@@ -204,11 +203,92 @@ function formatDate(dateValue: string) {
   });
 }
 
-function formatTimeRange(start: string | null, end: string | null) {
-  if (!start && !end) return "TBD";
-  const format = (value: string | null) =>
-    value ? new Date(value).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "TBD";
-  return `${format(start)} - ${format(end)}`;
+type TimeToken = {
+  text: string;
+  period: string;
+};
+
+function toTimeToken(value: string | null, alwaysMinutes: boolean): TimeToken | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  }).formatToParts(date);
+
+  const hour = parts.find((part) => part.type === "hour")?.value ?? "";
+  const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
+  const periodRaw = parts.find((part) => part.type === "dayPeriod")?.value ?? "";
+  const period = periodRaw.toUpperCase();
+  const text = alwaysMinutes || minute !== "00" ? `${hour}:${minute}` : hour;
+
+  if (!hour) return null;
+  return { text, period };
+}
+
+function formatRangeWithSharedPeriod(
+  start: string | null,
+  end: string | null,
+  options: { alwaysMinutes: boolean; separator: string }
+) {
+  const startToken = toTimeToken(start, options.alwaysMinutes);
+  const endToken = toTimeToken(end, options.alwaysMinutes);
+
+  if (!startToken && !endToken) return "TBD";
+  if (!startToken || !endToken) {
+    const fallback = (token: TimeToken | null) => (token ? `${token.text}${token.period ? ` ${token.period}` : ""}` : "TBD");
+    return `${fallback(startToken)}${options.separator}${fallback(endToken)}`;
+  }
+
+  if (startToken.period && endToken.period && startToken.period === endToken.period) {
+    return `${startToken.text}${options.separator}${endToken.text} ${endToken.period}`;
+  }
+
+  return `${startToken.text}${startToken.period ? ` ${startToken.period}` : ""}${options.separator}${endToken.text}${
+    endToken.period ? ` ${endToken.period}` : ""
+  }`;
+}
+
+function formatSessionTimeRangeMobile(start: string | null, end: string | null) {
+  return formatRangeWithSharedPeriod(start, end, { alwaysMinutes: true, separator: " – " });
+}
+
+function formatCourtTimeRangeMobile(start: string | null, end: string | null) {
+  return formatRangeWithSharedPeriod(start, end, { alwaysMinutes: false, separator: "–" });
+}
+
+function formatSessionTimeRangeDesktopLines(start: string | null, end: string | null) {
+  const startToken = toTimeToken(start, true);
+  const endToken = toTimeToken(end, true);
+
+  if (!startToken && !endToken) {
+    return { line1: "TBD", line2: "" };
+  }
+
+  if (!startToken || !endToken) {
+    const fallback = (token: TimeToken | null) => (token ? `${token.text}${token.period ? ` ${token.period}` : ""}` : "TBD");
+    return { line1: `${fallback(startToken)} -`, line2: fallback(endToken) };
+  }
+
+  if (startToken.period && endToken.period && startToken.period === endToken.period) {
+    return { line1: `${startToken.text} -`, line2: `${endToken.text} ${endToken.period}` };
+  }
+
+  return {
+    line1: `${startToken.text}${startToken.period ? ` ${startToken.period}` : ""} -`,
+    line2: `${endToken.text}${endToken.period ? ` ${endToken.period}` : ""}`
+  };
+}
+
+function formatParticipantsSummary(participants: ParticipantDetail[]) {
+  const names = participants
+    .map((entry) => entry.player?.name)
+    .filter((name): name is string => Boolean(name));
+  if (names.length === 0) return "Open";
+  return `${names.join(", ")} (${names.length} ${names.length === 1 ? "player" : "players"})`;
 }
 
 function buildEmptyForm(): SessionFormState {
@@ -254,6 +334,7 @@ export default function SessionsClient() {
   const [showPastSessions, setShowPastSessions] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("session_date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [entranceReady, setEntranceReady] = useState(false);
   const showDevDelete = isAdmin && process.env.NODE_ENV === "development";
 
   const courtsBySession = useMemo(() => {
@@ -291,7 +372,7 @@ export default function SessionsClient() {
   }, [adminPlayers, players]);
 
   const displayedSessions = useMemo(() => {
-    const filtered = sessions.filter((session) => (showPastSessions ? true : session.status === "OPEN"));
+    const filtered = sessions.filter((session) => (showPastSessions ? session.status !== "OPEN" : session.status === "OPEN"));
     const sorted = [...filtered].sort((a, b) => {
       if (sortKey === "status") {
         const cmp = a.status.localeCompare(b.status);
@@ -405,6 +486,38 @@ export default function SessionsClient() {
         router.replace("/denied");
       });
   }, [router]);
+
+  useEffect(() => {
+    if (!joinState.open) return;
+    const body = document.body;
+    const previousOverflow = body.style.overflow;
+    const previousPosition = body.style.position;
+    const previousTop = body.style.top;
+    const previousWidth = body.style.width;
+    const scrollY = window.scrollY;
+
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+
+    return () => {
+      body.style.overflow = previousOverflow;
+      body.style.position = previousPosition;
+      body.style.top = previousTop;
+      body.style.width = previousWidth;
+      window.scrollTo(0, scrollY);
+    };
+  }, [joinState.open]);
+
+  useEffect(() => {
+    if (gateState !== "allowed" || loading) {
+      setEntranceReady(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => setEntranceReady(true), 60);
+    return () => window.clearTimeout(timeout);
+  }, [gateState, loading]);
 
   const openJoinDialog = (sessionId: string) => {
     setActionMessage(null);
@@ -636,11 +749,29 @@ export default function SessionsClient() {
 
   if (!mounted || loading) {
     return (
-      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-16">
-        <div className="card">
-          <h1 className="text-3xl font-semibold">Upcoming Sessions</h1>
-          <p className="mt-2 text-slate-500">Loading...</p>
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+        <header className="flex flex-col gap-4 sm:gap-6">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-500">Club Genie</p>
+            <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Upcoming Sessions</h1>
+            <p className="mt-2 text-slate-500 dark:text-slate-300">Loading sessions...</p>
+          </div>
+        </header>
+        <div className="mt-6 flex flex-wrap items-center gap-2 animate-pulse">
+          <div className="h-10 w-36 rounded-full bg-slate-200/70 dark:bg-ink-700/60" />
+          <div className="h-10 w-24 rounded-full bg-slate-200/70 dark:bg-ink-700/60" />
+          <div className="h-10 w-24 rounded-full bg-slate-200/70 dark:bg-ink-700/60" />
         </div>
+        <section className="mt-8 space-y-4">
+          {Array.from({ length: 2 }).map((_, idx) => (
+            <div key={`skeleton-${idx}`} className="card animate-pulse">
+              <div className="h-7 w-48 rounded-lg bg-slate-200/70 dark:bg-ink-700/60" />
+              <div className="mt-3 h-5 w-44 rounded-lg bg-slate-200/70 dark:bg-ink-700/60" />
+              <div className="mt-2 h-5 w-24 rounded-lg bg-slate-200/70 dark:bg-ink-700/60" />
+              <div className="mt-6 h-10 w-40 rounded-full bg-slate-200/70 dark:bg-ink-700/60" />
+            </div>
+          ))}
+        </section>
       </main>
     );
   }
@@ -653,45 +784,70 @@ export default function SessionsClient() {
           <div>
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-500">Club Genie</p>
             <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Upcoming Sessions</h1>
-          <p className="mt-2 text-slate-500 dark:text-slate-300">
-            Reserve your courts, track players, and keep the night smooth.
-          </p>
         </div>
         <div className="flex items-center gap-3">
           {isAdmin ? (
             <button
               type="button"
               onClick={openCreateDialog}
-              className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              className="tap-feedback tap-feedback-strong btn-ripple rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm hover:-translate-y-0.5 hover:shadow-md"
             >
               Create Session
             </button>
           ) : null}
-          <ThemeToggle />
         </div>
         </div>
       </header>
 
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+      <div
+        className={`mt-6 flex flex-wrap items-center justify-between gap-3 transition-all duration-700 ease-out ${
+          entranceReady ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0"
+        }`}
+      >
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowPastSessions((prev) => !prev)}
-            className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
-          >
-            {showPastSessions ? "Hide past sessions" : "Show past sessions"}
-          </button>
+          <div className="inline-flex rounded-full border border-slate-200 p-1 dark:border-ink-700/60">
+            <button
+              type="button"
+              onClick={() => setShowPastSessions(false)}
+              className={`tap-feedback rounded-full px-4 py-2 text-sm font-semibold ${
+                !showPastSessions
+                  ? "bg-emerald-500 text-slate-900"
+                  : "text-slate-700 dark:text-slate-100"
+              }`}
+            >
+              Upcoming
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPastSessions(true)}
+              className={`tap-feedback rounded-full px-4 py-2 text-sm font-semibold ${
+                showPastSessions
+                  ? "bg-emerald-500 text-slate-900"
+                  : "text-slate-700 dark:text-slate-100"
+              }`}
+            >
+              Past
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => toggleSort("session_date")}
-            className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+            className={`tap-feedback rounded-full border px-4 py-2 text-sm font-semibold ${
+              sortKey === "session_date"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                : "border-slate-200 text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+            }`}
           >
             Date {sortKey === "session_date" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
           </button>
           <button
             type="button"
             onClick={() => toggleSort("status")}
-            className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+            className={`tap-feedback rounded-full border px-4 py-2 text-sm font-semibold ${
+              sortKey === "status"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                : "border-slate-200 text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+            }`}
           >
             Status {sortKey === "status" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
           </button>
@@ -701,20 +857,23 @@ export default function SessionsClient() {
 
       {displayedSessions.length === 0 ? (
         <section className="card mt-10">
-          <p>{showPastSessions ? "No sessions available yet." : "No open sessions available."}</p>
+          <p>{showPastSessions ? "No past sessions available." : "No upcoming sessions available."}</p>
         </section>
       ) : (
         <section className="mt-8 sm:mt-10">
           <div className="space-y-4 md:hidden">
-            {displayedSessions.map((session) => {
+            {displayedSessions.map((session, index) => {
               const courtItems = courtsBySession[session.id] ?? [];
               const participantItems = participantsBySession[session.id] ?? [];
-              const participantNames = participantItems
-                .map((entry) => entry.player?.name)
-                .filter(Boolean)
-                .join(", ");
+              const participantSummary = formatParticipantsSummary(participantItems);
               return (
-                <article key={session.id} className="card p-4">
+                <article
+                  key={session.id}
+                  className={`card p-4 transition-all duration-700 ease-out ${
+                    entranceReady ? "translate-x-0 opacity-100" : "translate-x-8 opacity-0"
+                  }`}
+                  style={{ transitionDelay: `${Math.min(120 + index * 90, 700)}ms` }}
+                >
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-semibold">{formatDate(session.session_date)}</div>
                     <div className="flex flex-col items-end gap-2">
@@ -725,7 +884,7 @@ export default function SessionsClient() {
                             : session.status === "CLOSED"
                             ? "bg-slate-200 text-slate-600 dark:bg-ink-700 dark:text-slate-200"
                             : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
-                        }`}
+                        } ${session.status === "OPEN" ? "neon-open-badge" : ""}`}
                       >
                         {session.status}
                       </span>
@@ -744,62 +903,68 @@ export default function SessionsClient() {
                       ) : null}
                     </div>
                   </div>
-                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                    {formatTimeRange(session.start_time, session.end_time)}
+                  <p className="mt-2 flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-300">
+                    <Clock3 size={14} className="text-emerald-400 dark:text-emerald-300" />
+                    <span>{formatSessionTimeRangeMobile(session.start_time, session.end_time)}</span>
                   </p>
-                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                    {session.location ?? "TBD"}
+                  <p className="mt-1 flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-300">
+                    <MapPin size={14} className="text-emerald-400 dark:text-emerald-300" />
+                    <span>{session.location ?? "TBD"}</span>
                   </p>
                   {session.remarks ? <p className="mt-2 text-xs text-slate-500">{session.remarks}</p> : null}
                   <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+                    <p className="flex items-center gap-2.5 font-semibold">
+                      <LayoutGrid size={14} className="text-emerald-400 dark:text-emerald-300" />
+                      <span>Courts:</span>
+                    </p>
                     {courtItems.length === 0 ? (
-                      <span>TBD courts</span>
+                      <p className="mt-1 ml-6">TBD</p>
                     ) : (
-                      <ul className="space-y-1">
+                      <ul className="mt-1 ml-6 space-y-1">
                         {courtItems.map((court) => (
                           <li key={court.id}>
-                            {court.court_label ?? "Court"} • {formatTimeRange(court.start_time, court.end_time)}
+                            {court.court_label ?? "Court"} ({formatCourtTimeRangeMobile(court.start_time, court.end_time)})
                           </li>
                         ))}
                       </ul>
                     )}
                   </div>
-                  <div className="mt-3 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                    <Users2 size={14} />
-                    <span>{participantNames || "Open"}</span>
+                  <div className="mt-3 flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-300">
+                    <Users2 size={14} className="text-emerald-400 dark:text-emerald-300" />
+                    <span>{participantSummary}</span>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-                      onClick={() => openJoinDialog(session.id)}
-                      disabled={session.status === "CLOSED"}
-                    >
-                      Join / Withdraw
-                    </button>
-                    {isAdmin ? (
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <span className="inline-flex items-center text-sm font-normal text-slate-400 dark:text-slate-400">
+                      {session.total_fee ? `$${session.total_fee.toFixed(2)}` : "-"}
+                    </span>
+                    <div className="flex flex-wrap justify-end gap-2">
                       <button
                         type="button"
-                        className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-                        onClick={() => openEditDialog(session)}
+                        className="tap-feedback tap-feedback-strong btn-ripple min-h-11 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:-translate-y-0.5 hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+                        onClick={() => openJoinDialog(session.id)}
+                        disabled={session.status === "CLOSED"}
                       >
-                        Edit
+                        Join / Withdraw
                       </button>
-                    ) : null}
-                    {showDevDelete ? (
-                      <button
-                        type="button"
-                        className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:border-rose-300 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
-                        onClick={() => deleteSessionDevOnly(session.id)}
-                      >
-                        Delete
-                      </button>
-                    ) : null}
-                    {session.total_fee ? (
-                      <span className="inline-flex items-center text-xs text-slate-500 dark:text-slate-300">
-                        ${session.total_fee.toFixed(2)}
-                      </span>
-                    ) : null}
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          className="tap-feedback min-h-11 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:-translate-y-0.5 hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+                          onClick={() => openEditDialog(session)}
+                        >
+                          Edit
+                        </button>
+                      ) : null}
+                      {showDevDelete ? (
+                        <button
+                          type="button"
+                          className="tap-feedback min-h-11 rounded-full border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:-translate-y-0.5 hover:border-rose-300 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
+                          onClick={() => deleteSessionDevOnly(session.id)}
+                        >
+                          Delete
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 </article>
               );
@@ -807,92 +972,93 @@ export default function SessionsClient() {
           </div>
 
           <div className="hidden overflow-hidden rounded-3xl border border-slate-200/80 bg-white/90 shadow-sm dark:border-ink-700/60 dark:bg-ink-800/80 md:block">
-            <div className="grid grid-cols-8 gap-4 border-b border-slate-200/60 bg-slate-100/70 px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-ink-700/60 dark:bg-ink-900/40 dark:text-slate-300">
-              <span>Day</span>
-              <button type="button" onClick={() => toggleSort("session_date")} className="inline-flex items-center gap-1 text-left">
+            <div className="grid grid-cols-[0.55fr_0.95fr_0.8fr_1.05fr_1.45fr_2.4fr_0.6fr_1.1fr] gap-4 border-b border-slate-200/60 bg-slate-100/70 px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-ink-700/60 dark:bg-ink-900/40 dark:text-slate-300">
+              <span className="inline-flex items-center gap-2">
+                <CalendarDays size={13} className="text-emerald-400 dark:text-emerald-300" />
+                Day
+              </span>
+              <button type="button" onClick={() => toggleSort("session_date")} className="inline-flex items-center gap-2 text-left">
+                <CalendarDays size={13} className="text-emerald-400 dark:text-emerald-300" />
                 Date
                 <ArrowUpDown size={12} />
               </button>
-              <span>Time</span>
-              <span>Location</span>
-              <span>Courts</span>
-              <span>Participants</span>
-              <span>Fee</span>
-              <button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center gap-1 text-left">
+              <span className="inline-flex items-center gap-2">
+                <Clock3 size={13} className="text-emerald-400 dark:text-emerald-300" />
+                Time
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <MapPin size={13} className="text-emerald-400 dark:text-emerald-300" />
+                Location
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <LayoutGrid size={13} className="text-emerald-400 dark:text-emerald-300" />
+                Courts
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <Users2 size={13} className="text-emerald-400 dark:text-emerald-300" />
+                Participants
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <DollarSign size={13} className="text-emerald-400 dark:text-emerald-300" />
+                Fee
+              </span>
+              <button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center gap-2 text-left">
+                <Rows3 size={13} className="text-emerald-400 dark:text-emerald-300" />
                 Status
                 <ArrowUpDown size={12} />
               </button>
             </div>
             <div className="divide-y divide-slate-200/70 dark:divide-ink-700/60">
-              {displayedSessions.map((session) => {
+              {displayedSessions.map((session, index) => {
                 const courtItems = courtsBySession[session.id] ?? [];
                 const participantItems = participantsBySession[session.id] ?? [];
-                const participantNames = participantItems
-                  .map((entry) => entry.player?.name)
-                  .filter(Boolean)
-                  .join(", ");
+                const participantSummary = formatParticipantsSummary(participantItems);
+                const sessionTimeLines = formatSessionTimeRangeDesktopLines(session.start_time, session.end_time);
                 return (
-                  <div key={session.id} className="grid grid-cols-8 items-center gap-4 px-6 py-5 text-sm">
-                    <div className="flex items-center gap-2 text-slate-500 dark:text-slate-300">
-                      <CalendarDays size={16} />
-                      <span>{new Date(session.session_date).toLocaleDateString(undefined, { weekday: "short" })}</span>
+                  <div
+                    key={session.id}
+                    className={`grid grid-cols-[0.55fr_0.95fr_0.8fr_1.05fr_1.45fr_2.4fr_0.6fr_1.1fr] items-start gap-4 px-6 py-5 text-sm transition-all duration-700 ease-out ${
+                      entranceReady ? "translate-x-0 opacity-100" : "translate-x-8 opacity-0"
+                    }`}
+                    style={{ transitionDelay: `${Math.min(120 + index * 70, 600)}ms` }}
+                  >
+                    <div className="text-slate-500 dark:text-slate-300">
+                      {new Date(session.session_date).toLocaleDateString(undefined, { weekday: "short" })}
                     </div>
                     <div className="font-semibold">{formatDate(session.session_date)}</div>
                     <div className="text-slate-600 dark:text-slate-300">
-                      {formatTimeRange(session.start_time, session.end_time)}
+                      <p>{sessionTimeLines.line1}</p>
+                      {sessionTimeLines.line2 ? <p>{sessionTimeLines.line2}</p> : null}
                     </div>
                     <div className="text-slate-600 dark:text-slate-300">
-                      <div className="flex items-center gap-2">
-                        <MapPin size={14} />
-                        <span>{session.location ?? "TBD"}</span>
-                      </div>
+                      <div>{session.location ?? "TBD"}</div>
                       {session.remarks ? <div className="mt-2 text-xs">{session.remarks}</div> : null}
                     </div>
                     <div className="text-slate-600 dark:text-slate-300">
+                      <p className="font-semibold">Courts:</p>
                       {courtItems.length === 0 ? (
-                        <span>TBD</span>
+                        <p className="mt-1">TBD</p>
                       ) : (
-                        <ul className="space-y-1">
+                        <ul className="mt-1 space-y-1">
                           {courtItems.map((court) => (
                             <li key={court.id}>
-                              {court.court_label ?? "Court"} • {formatTimeRange(court.start_time, court.end_time)}
+                              {court.court_label ?? "Court"} ({formatCourtTimeRangeMobile(court.start_time, court.end_time)})
                             </li>
                           ))}
                         </ul>
                       )}
                     </div>
                     <div className="text-slate-600 dark:text-slate-300">
-                      <div className="flex items-center gap-2">
-                        <Users2 size={14} />
-                        <span>{participantNames || "Open"}</span>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
+                      <span>{participantSummary}</span>
+                      <div className="mt-2">
                         <button
                           type="button"
-                          className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+                          className="tap-feedback tap-feedback-strong btn-ripple rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:-translate-y-0.5 hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
                           onClick={() => openJoinDialog(session.id)}
                           disabled={session.status === "CLOSED"}
                         >
                           Join / Withdraw
                         </button>
-                        {isAdmin ? (
-                          <button
-                            type="button"
-                            className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-                            onClick={() => openEditDialog(session)}
-                          >
-                            Edit
-                          </button>
-                        ) : null}
-                        {showDevDelete ? (
-                          <button
-                            type="button"
-                            className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:border-rose-300 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
-                            onClick={() => deleteSessionDevOnly(session.id)}
-                          >
-                            Delete
-                          </button>
-                        ) : null}
                       </div>
                     </div>
                     <div className="text-slate-600 dark:text-slate-300">
@@ -907,7 +1073,7 @@ export default function SessionsClient() {
                               : session.status === "CLOSED"
                               ? "bg-slate-200 text-slate-600 dark:bg-ink-700 dark:text-slate-200"
                               : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
-                          }`}
+                          } ${session.status === "OPEN" ? "neon-open-badge" : ""}`}
                         >
                           {session.status}
                         </span>
@@ -924,6 +1090,28 @@ export default function SessionsClient() {
                             Splitwise {session.splitwise_status ?? "PENDING"}
                           </span>
                         ) : null}
+                        {(isAdmin || showDevDelete) && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {isAdmin ? (
+                              <button
+                                type="button"
+                                className="tap-feedback rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:-translate-y-0.5 hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+                                onClick={() => openEditDialog(session)}
+                              >
+                                Edit
+                              </button>
+                            ) : null}
+                            {showDevDelete ? (
+                              <button
+                                type="button"
+                                className="tap-feedback rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 hover:-translate-y-0.5 hover:border-rose-300 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
+                                onClick={() => deleteSessionDevOnly(session.id)}
+                              >
+                                Delete
+                              </button>
+                            ) : null}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -976,14 +1164,14 @@ export default function SessionsClient() {
             </div>
             {joinDialogError ? <p className="mt-3 text-sm text-rose-400">{joinDialogError}</p> : null}
             <div className="mt-4 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={handleSubmitParticipants}
-                disabled={joinState.isSubmitting}
-                className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900"
-              >
-                {joinState.isSubmitting ? "Submitting..." : "Submit"}
-              </button>
+                <button
+                  type="button"
+                  onClick={handleSubmitParticipants}
+                  disabled={joinState.isSubmitting}
+                  className="tap-feedback tap-feedback-strong btn-ripple rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:-translate-y-0.5"
+                >
+                  {joinState.isSubmitting ? "Submitting..." : "Submit"}
+                </button>
             </div>
           </div>
         </section>
@@ -1172,7 +1360,7 @@ export default function SessionsClient() {
                 type="button"
                 onClick={submitSessionForm}
                 disabled={formState.isSubmitting}
-                className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900"
+                className="tap-feedback tap-feedback-strong btn-ripple rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:-translate-y-0.5"
               >
                 {formState.isSubmitting ? "Saving..." : "Save Session"}
               </button>
@@ -1188,35 +1376,6 @@ export default function SessionsClient() {
         </section>
       ) : null}
 
-      <section className="mt-10 grid gap-6 md:grid-cols-3">
-        <div className="card">
-          <div className="flex items-center gap-3 text-slate-600 dark:text-slate-300">
-            <ClipboardList size={18} />
-            <span className="text-xs font-semibold uppercase tracking-wider">Session Rules</span>
-          </div>
-          <p className="mt-3 text-sm text-slate-500 dark:text-slate-300">
-            Join or withdraw any time before the session starts. Admins can update courts and fees.
-          </p>
-        </div>
-        <div className="card">
-          <div className="flex items-center gap-3 text-slate-600 dark:text-slate-300">
-            <Users2 size={18} />
-            <span className="text-xs font-semibold uppercase tracking-wider">Bring Friends</span>
-          </div>
-          <p className="mt-3 text-sm text-slate-500 dark:text-slate-300">
-            Select multiple players in a single action to keep the roster accurate.
-          </p>
-        </div>
-        <div className="card">
-          <div className="flex items-center gap-3 text-slate-600 dark:text-slate-300">
-            <MapPin size={18} />
-            <span className="text-xs font-semibold uppercase tracking-wider">Court Notes</span>
-          </div>
-          <p className="mt-3 text-sm text-slate-500 dark:text-slate-300">
-            Locations and court times update automatically from receipts or admin edits.
-          </p>
-        </div>
-      </section>
     </main>
   );
 }

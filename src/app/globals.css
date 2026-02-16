@@ -29,3 +29,231 @@ body {
 .pill {
   @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide;
 }
+
+.tap-feedback {
+  transition:
+    transform 180ms ease,
+    box-shadow 220ms ease,
+    filter 220ms ease,
+    border-color 220ms ease,
+    background-color 220ms ease,
+    color 220ms ease;
+}
+
+.tap-feedback:active {
+  transform: scale(0.95);
+  filter: brightness(1.08);
+}
+
+.tap-feedback-strong:active {
+  transform: scale(0.92);
+  filter: brightness(1.12);
+}
+
+@keyframes button-ripple-burst {
+  0% {
+    opacity: 0.42;
+    transform: translate(-50%, -50%) scale(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(28);
+  }
+}
+
+.btn-ripple {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.btn-ripple::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.48);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0);
+}
+
+.btn-ripple:active::after {
+  animation: button-ripple-burst 420ms ease-out;
+}
+
+@keyframes neon-open-flicker {
+  0%,
+  9.863%,
+  20.712%,
+  32.877%,
+  42.74%,
+  53.589%,
+  65.753%,
+  100% {
+    opacity: 1;
+    filter: brightness(1.04);
+    box-shadow:
+      inset 0 0 0 1px rgba(199, 255, 236, 0.18),
+      inset 0 0 14px rgba(96, 251, 198, 0.33),
+      0 0 10px rgba(74, 222, 168, 0.6),
+      0 0 24px rgba(52, 211, 153, 0.46),
+      0 0 44px rgba(16, 185, 129, 0.3);
+  }
+  10.849%,
+  23.014%,
+  43.726%,
+  55.89% {
+    opacity: 0.72;
+    filter: brightness(0.9);
+    box-shadow:
+      inset 0 0 0 1px rgba(199, 255, 236, 0.12),
+      inset 0 0 6px rgba(96, 251, 198, 0.2),
+      0 0 4px rgba(74, 222, 168, 0.3),
+      0 0 10px rgba(16, 185, 129, 0.18),
+      0 0 20px rgba(16, 185, 129, 0.12);
+  }
+  11.178%,
+  23.342%,
+  44.055%,
+  56.219% {
+    opacity: 0.5;
+    filter: brightness(0.82);
+  }
+}
+
+.neon-open-badge {
+  position: relative;
+  isolation: isolate;
+  color: rgb(209 250 229) !important;
+  border: 1px solid rgba(96, 251, 198, 0.82) !important;
+  background:
+    radial-gradient(circle at 50% 140%, rgba(125, 255, 211, 0.26), transparent 58%),
+    linear-gradient(180deg, rgba(16, 94, 74, 0.56) 0%, rgba(10, 61, 50, 0.7) 100%) !important;
+  text-shadow:
+    0 0 6px rgba(167, 243, 208, 0.78),
+    0 0 14px rgba(96, 251, 198, 0.46);
+  box-shadow:
+    inset 0 0 0 1px rgba(199, 255, 236, 0.18),
+    inset 0 0 14px rgba(96, 251, 198, 0.33),
+    0 0 10px rgba(74, 222, 168, 0.6),
+    0 0 24px rgba(52, 211, 153, 0.46),
+    0 0 44px rgba(16, 185, 129, 0.3);
+  animation: neon-open-flicker 14.6s steps(220, end) infinite;
+}
+
+.neon-open-badge::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 9999px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.36) 0%, rgba(16, 185, 129, 0.1) 48%, transparent 74%);
+  filter: blur(2px);
+  opacity: 0.88;
+}
+
+.neon-open-badge::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(220, 255, 242, 0.14) 0%, rgba(220, 255, 242, 0.02) 58%, transparent 100%);
+}
+
+@keyframes neon-open-flicker-light {
+  0%,
+  9.863%,
+  20.712%,
+  32.877%,
+  42.74%,
+  53.589%,
+  65.753%,
+  100% {
+    opacity: 1;
+    filter: brightness(1.01);
+    box-shadow:
+      inset 0 0 0 1px rgba(199, 255, 236, 0.12),
+      inset 0 0 8px rgba(96, 251, 198, 0.2),
+      0 0 6px rgba(74, 222, 168, 0.3),
+      0 0 14px rgba(52, 211, 153, 0.22),
+      0 0 24px rgba(16, 185, 129, 0.14);
+  }
+  10.849%,
+  23.014%,
+  43.726%,
+  55.89% {
+    opacity: 0.76;
+    filter: brightness(0.95);
+    box-shadow:
+      inset 0 0 0 1px rgba(199, 255, 236, 0.09),
+      inset 0 0 4px rgba(96, 251, 198, 0.14),
+      0 0 3px rgba(74, 222, 168, 0.2),
+      0 0 8px rgba(16, 185, 129, 0.12),
+      0 0 16px rgba(16, 185, 129, 0.08);
+  }
+  11.178%,
+  23.342%,
+  44.055%,
+  56.219% {
+    opacity: 0.6;
+    filter: brightness(0.88);
+  }
+}
+
+html:not(.dark) .neon-open-badge {
+  color: rgb(6 95 70) !important;
+  border-color: rgba(16, 185, 129, 0.42) !important;
+  background:
+    radial-gradient(circle at 50% 140%, rgba(125, 255, 211, 0.18), transparent 58%),
+    linear-gradient(180deg, rgba(237, 255, 248, 0.94) 0%, rgba(223, 255, 243, 0.88) 100%) !important;
+  text-shadow:
+    0 0 3px rgba(16, 185, 129, 0.2),
+    0 0 8px rgba(16, 185, 129, 0.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(199, 255, 236, 0.12),
+    inset 0 0 8px rgba(96, 251, 198, 0.2),
+    0 0 6px rgba(74, 222, 168, 0.3),
+    0 0 14px rgba(52, 211, 153, 0.22),
+    0 0 24px rgba(16, 185, 129, 0.14);
+  animation: neon-open-flicker-light 14.6s steps(220, end) infinite;
+}
+
+html:not(.dark) .neon-open-badge::before {
+  opacity: 0.5;
+  filter: blur(3px);
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.24) 0%, rgba(16, 185, 129, 0.08) 48%, transparent 74%);
+}
+
+html:not(.dark) .neon-open-badge::after {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.08) 58%, transparent 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tap-feedback {
+    transition: none;
+  }
+
+  .tap-feedback:active {
+    transform: none;
+    filter: none;
+  }
+
+  .tap-feedback-strong:active {
+    transform: none;
+    filter: none;
+  }
+
+  .btn-ripple:active::after {
+    animation: none;
+  }
+
+  .neon-open-badge {
+    animation: none;
+  }
+}

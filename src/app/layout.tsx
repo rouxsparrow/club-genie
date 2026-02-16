@@ -1,13 +1,15 @@
 import type { ReactNode } from "react";
 import { Space_Grotesk, Space_Mono } from "next/font/google";
+import ThemeToggle from "../components/theme-toggle";
 import "./globals.css";
 
 const themeScript = `
   (function () {
     try {
       var stored = localStorage.getItem("theme");
-      var theme = stored || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      var theme = stored || "dark";
       if (theme === "dark") document.documentElement.classList.add("dark");
+      else document.documentElement.classList.remove("dark");
     } catch (e) {}
   })();
 `;
@@ -29,6 +31,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
     <html lang="en" className={`${spaceGrotesk.variable} ${spaceMono.variable}`} suppressHydrationWarning>
       <body className="page-shell font-sans" suppressHydrationWarning>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <ThemeToggle className="fixed right-4 top-4 z-40 sm:right-6 sm:top-6" />
         {children}
       </body>
     </html>

@@ -2,7 +2,7 @@
 
 - Ingest receipts: once daily at 23:30 SGT (15:30 UTC).
 - Scheduler host: GitHub Actions workflow (`.github/workflows/run-ingestion.yml`).
-- Daily close: 23:00 (idempotent close + Splitwise later).
+- Splitwise sync + auto-close: 22:00 SGT (14:00 UTC) via `.github/workflows/run-splitwise-sync.yml`.
 
 ## Notes
 - Cron calls `run-ingestion` with `x-automation-secret`.

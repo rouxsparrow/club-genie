@@ -26,6 +26,8 @@ type SessionSummary = {
   id: string;
   session_date: string;
   status: string;
+  splitwise_status?: string | null;
+  payer_player_id?: string | null;
   start_time: string | null;
   end_time: string | null;
   total_fee: number | null;
@@ -52,6 +54,13 @@ type Player = {
   active: boolean;
 };
 
+type AdminPlayer = {
+  id: string;
+  name: string;
+  active: boolean;
+  is_default_payer?: boolean;
+};
+
 type JoinState = {
   open: boolean;
   sessionId: string | null;
@@ -70,6 +79,7 @@ type SessionFormState = {
   location: string;
   total_fee: string;
   remarks: string;
+  payer_player_id: string;
   status: string;
   courts: { id: string; court_label: string; start_time: string; end_time: string }[];
   isSubmitting: boolean;
@@ -79,6 +89,7 @@ type SortKey = "session_date" | "status";
 type SortDirection = "asc" | "desc";
 
 const QUARTER_MINUTES = ["00", "15", "30", "45"] as const;
+const USE_DEFAULT_PAYER_VALUE = "__USE_DEFAULT_PAYER__";
 
 function to12HourParts(value: string) {
   if (!/^\d{2}:\d{2}$/.test(value)) {
@@ -211,6 +222,7 @@ function buildEmptyForm(): SessionFormState {
     location: "",
     total_fee: "",
     remarks: "",
+    payer_player_id: USE_DEFAULT_PAYER_VALUE,
     status: "OPEN",
     courts: [],
     isSubmitting: false
@@ -225,6 +237,7 @@ export default function SessionsClient() {
   const [courts, setCourts] = useState<CourtDetail[]>([]);
   const [participants, setParticipants] = useState<ParticipantDetail[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [adminPlayers, setAdminPlayers] = useState<AdminPlayer[]>([]);
   const [loading, setLoading] = useState(true);
   const [joinState, setJoinState] = useState<JoinState>({
     open: false,
@@ -241,6 +254,7 @@ export default function SessionsClient() {
   const [showPastSessions, setShowPastSessions] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("session_date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const showDevDelete = isAdmin && process.env.NODE_ENV === "development";
 
   const courtsBySession = useMemo(() => {
     const map: Record<string, CourtDetail[]> = {};
@@ -257,6 +271,24 @@ export default function SessionsClient() {
     });
     return map;
   }, [participants]);
+
+  const defaultPayer = useMemo(
+    () => adminPlayers.find((player) => Boolean(player.is_default_payer)) ?? null,
+    [adminPlayers]
+  );
+
+  const payerOptions = useMemo<AdminPlayer[]>(() => {
+    const adminActive = adminPlayers.filter((player) => player.active);
+    if (adminActive.length > 0) return adminActive;
+    return players
+      .filter((player) => player.active)
+      .map((player) => ({
+      id: player.id,
+      name: player.name,
+      active: player.active,
+      is_default_payer: false
+      }));
+  }, [adminPlayers, players]);
 
   const displayedSessions = useMemo(() => {
     const filtered = sessions.filter((session) => (showPastSessions ? true : session.status === "OPEN"));
@@ -318,13 +350,24 @@ export default function SessionsClient() {
         }
         setGateState("allowed");
         const adminResponse = await fetch("/api/admin-session").catch(() => null);
+        let isAdminUser = false;
         if (adminResponse?.ok) {
           const adminData = (await adminResponse.json()) as { ok: boolean };
-          setIsAdmin(adminData.ok);
+          isAdminUser = Boolean(adminData.ok);
+          setIsAdmin(isAdminUser);
         } else {
           setIsAdmin(false);
         }
-        const [sessionsResponse, playersResponse] = await Promise.all([listSessions(token), listPlayers(token)]);
+
+        const [sessionsResponse, playersResponse, adminPlayersResponse] = await Promise.all([
+          listSessions(token),
+          listPlayers(token),
+          isAdminUser
+            ? fetch("/api/admin/players", { credentials: "include" })
+                .then((response) => response.json())
+                .catch(() => null)
+            : Promise.resolve(null)
+        ]);
         if (sessionsResponse?.ok) {
           setSessions(sessionsResponse.sessions ?? []);
           setCourts(sessionsResponse.courts ?? []);
@@ -332,6 +375,27 @@ export default function SessionsClient() {
         }
         if (playersResponse?.ok) {
           setPlayers(playersResponse.players ?? []);
+        }
+        if (isAdminUser) {
+          const adminPlayersPayload = adminPlayersResponse as
+            | { ok?: boolean; players?: Array<{ id?: string; name?: string; active?: boolean; is_default_payer?: boolean }> }
+            | null;
+          if (adminPlayersPayload?.ok && Array.isArray(adminPlayersPayload.players)) {
+            setAdminPlayers(
+              adminPlayersPayload.players
+                .filter((player) => typeof player?.id === "string" && typeof player?.name === "string")
+                .map((player) => ({
+                  id: player.id as string,
+                  name: player.name as string,
+                  active: Boolean(player.active),
+                  is_default_payer: Boolean(player.is_default_payer)
+                }))
+            );
+          } else {
+            setAdminPlayers([]);
+          }
+        } else {
+          setAdminPlayers([]);
         }
         setLoading(false);
       })
@@ -355,6 +419,29 @@ export default function SessionsClient() {
       joinedPlayerIds,
       isSubmitting: false
     });
+  };
+
+  const deleteSessionDevOnly = async (sessionId: string) => {
+    if (!showDevDelete) return;
+    setActionMessage(null);
+    const confirmed = window.confirm("Delete this session? This cannot be undone.");
+    if (!confirmed) return;
+
+    const response = await fetch(`/api/admin/sessions/${sessionId}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!data?.ok) {
+      setActionMessage(data?.error ?? "Failed to delete session.");
+      return;
+    }
+
+    const token = localStorage.getItem(getClubTokenStorageKey());
+    if (token) {
+      await refreshSessions(token);
+    }
+    setActionMessage("Session deleted.");
   };
 
   const closeJoinDialog = () => {
@@ -431,7 +518,7 @@ export default function SessionsClient() {
 
   const openCreateDialog = () => {
     setFormMessage(null);
-    setFormState({ ...buildEmptyForm(), open: true, mode: "create" });
+    setFormState({ ...buildEmptyForm(), open: true, mode: "create", payer_player_id: USE_DEFAULT_PAYER_VALUE });
   };
 
   const openEditDialog = (session: SessionSummary) => {
@@ -453,6 +540,10 @@ export default function SessionsClient() {
       location: session.location ?? "",
       total_fee: session.total_fee?.toString() ?? "",
       remarks: session.remarks ?? "",
+      payer_player_id:
+        typeof session.payer_player_id === "string" && session.payer_player_id.trim()
+          ? session.payer_player_id
+          : USE_DEFAULT_PAYER_VALUE,
       status: session.status,
       courts: courtRows,
       isSubmitting: false
@@ -507,6 +598,7 @@ export default function SessionsClient() {
       location: formState.location || null,
       total_fee: formState.total_fee ? Number(formState.total_fee) : null,
       remarks: formState.remarks || null,
+      payerPlayerId: formState.payer_player_id === USE_DEFAULT_PAYER_VALUE ? null : formState.payer_player_id || null,
       status: formState.status,
       courts: formState.courts.map((court) => ({
         court_label: court.court_label || null,
@@ -625,17 +717,32 @@ export default function SessionsClient() {
                 <article key={session.id} className="card p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-semibold">{formatDate(session.session_date)}</div>
-                    <span
-                      className={`pill ${
-                        session.status === "OPEN"
-                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
-                          : session.status === "CLOSED"
-                          ? "bg-slate-200 text-slate-600 dark:bg-ink-700 dark:text-slate-200"
-                          : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
-                      }`}
-                    >
-                      {session.status}
-                    </span>
+                    <div className="flex flex-col items-end gap-2">
+                      <span
+                        className={`pill ${
+                          session.status === "OPEN"
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
+                            : session.status === "CLOSED"
+                            ? "bg-slate-200 text-slate-600 dark:bg-ink-700 dark:text-slate-200"
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
+                        }`}
+                      >
+                        {session.status}
+                      </span>
+                      {isAdmin && session.status === "CLOSED" ? (
+                        <span
+                          className={`pill ${
+                            session.splitwise_status === "CREATED"
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
+                              : session.splitwise_status === "FAILED"
+                              ? "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200"
+                              : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
+                          }`}
+                        >
+                          Splitwise {session.splitwise_status ?? "PENDING"}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                     {formatTimeRange(session.start_time, session.end_time)}
@@ -677,6 +784,15 @@ export default function SessionsClient() {
                         onClick={() => openEditDialog(session)}
                       >
                         Edit
+                      </button>
+                    ) : null}
+                    {showDevDelete ? (
+                      <button
+                        type="button"
+                        className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:border-rose-300 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
+                        onClick={() => deleteSessionDevOnly(session.id)}
+                      >
+                        Delete
                       </button>
                     ) : null}
                     {session.total_fee ? (
@@ -768,23 +884,47 @@ export default function SessionsClient() {
                             Edit
                           </button>
                         ) : null}
+                        {showDevDelete ? (
+                          <button
+                            type="button"
+                            className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:border-rose-300 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
+                            onClick={() => deleteSessionDevOnly(session.id)}
+                          >
+                            Delete
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                     <div className="text-slate-600 dark:text-slate-300">
                       {session.total_fee ? `$${session.total_fee.toFixed(2)}` : "-"}
                     </div>
                     <div className="flex items-center">
-                      <span
-                        className={`pill ${
-                          session.status === "OPEN"
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
-                            : session.status === "CLOSED"
-                            ? "bg-slate-200 text-slate-600 dark:bg-ink-700 dark:text-slate-200"
-                            : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
-                        }`}
-                      >
-                        {session.status}
-                      </span>
+                      <div className="flex flex-col items-start gap-2">
+                        <span
+                          className={`pill ${
+                            session.status === "OPEN"
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
+                              : session.status === "CLOSED"
+                              ? "bg-slate-200 text-slate-600 dark:bg-ink-700 dark:text-slate-200"
+                              : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
+                          }`}
+                        >
+                          {session.status}
+                        </span>
+                        {isAdmin && session.status === "CLOSED" ? (
+                          <span
+                            className={`pill ${
+                              session.splitwise_status === "CREATED"
+                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
+                                : session.splitwise_status === "FAILED"
+                                ? "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200"
+                                : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
+                            }`}
+                          >
+                            Splitwise {session.splitwise_status ?? "PENDING"}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 );
@@ -935,6 +1075,32 @@ export default function SessionsClient() {
                     onChange={(event) => updateFormField("remarks", event.target.value)}
                     className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-ink-700/60 dark:bg-ink-800"
                   />
+                </label>
+                <label className="text-sm font-semibold">
+                  Payer
+                  <select
+                    value={formState.payer_player_id}
+                    onChange={(event) => updateFormField("payer_player_id", event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-ink-700/60 dark:bg-ink-800"
+                  >
+                    <option value={USE_DEFAULT_PAYER_VALUE}>
+                      Use default payer ({defaultPayer?.name ?? "not set"})
+                    </option>
+                    {payerOptions.map((player) => (
+                      <option key={player.id} value={player.id}>
+                        {player.name}
+                        {player.active ? "" : " (inactive)"}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="mt-2 block text-xs text-slate-400">
+                    Default payer is applied and saved explicitly.
+                  </span>
+                  {adminPlayers.length === 0 && players.length > 0 ? (
+                    <span className="mt-1 block text-xs text-amber-400">
+                      Loaded active-player fallback list (admin roster details unavailable).
+                    </span>
+                  ) : null}
                 </label>
               </div>
             </div>

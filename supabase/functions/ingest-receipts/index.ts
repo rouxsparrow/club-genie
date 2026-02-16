@@ -55,6 +55,71 @@ async function requireIngestionAuth(req: Request) {
   return false;
 }
 
+async function loadDefaultPayerId(supabase: ReturnType<typeof createClient>) {
+  const { data, error } = await supabase
+    .from("players")
+    .select("id")
+    .eq("is_default_payer", true)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error("default_payer_lookup_failed");
+  }
+  const payerId = typeof data?.id === "string" && data.id.trim() ? data.id : null;
+  if (!payerId) {
+    throw new Error("missing_default_payer");
+  }
+  return payerId;
+}
+
+async function resolveSessionPayerIdForDate(supabase: ReturnType<typeof createClient>, sessionDate: string) {
+  const { data: existing, error } = await supabase
+    .from("sessions")
+    .select("id,status,payer_player_id")
+    .eq("session_date", sessionDate)
+    .maybeSingle();
+
+  if (error) {
+    const message = error.message ?? "";
+    if (message.includes("payer_player_id")) {
+      throw new Error("missing_session_payer_column");
+    }
+    throw new Error("session_lookup_failed");
+  }
+
+  if (typeof existing?.payer_player_id === "string" && existing.payer_player_id.trim()) {
+    return {
+      existingStatus: existing.status ?? null,
+      payerPlayerId: existing.payer_player_id
+    };
+  }
+
+  const defaultPayerId = await loadDefaultPayerId(supabase);
+  return {
+    existingStatus: existing?.status ?? null,
+    payerPlayerId: defaultPayerId
+  };
+}
+
+async function upsertDraftSessionForDate(supabase: ReturnType<typeof createClient>, sessionDate: string) {
+  const resolved = await resolveSessionPayerIdForDate(supabase, sessionDate);
+  const { error } = await supabase
+    .from("sessions")
+    .upsert(
+      {
+        session_date: sessionDate,
+        status: "DRAFT",
+        payer_player_id: resolved.payerPlayerId,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "session_date" }
+    );
+  if (error) {
+    throw new Error("session_draft_upsert_failed");
+  }
+}
+
 function toCourtJson(courts: ParsedCourtRow[]) {
   return courts.map((court) => ({
     court_label: court.courtLabel,
@@ -79,13 +144,8 @@ async function recomputeSessionForDate(supabase: ReturnType<typeof createClient>
     throw new Error("invalid_receipt_aggregate");
   }
 
-  const { data: existing } = await supabase
-    .from("sessions")
-    .select("id, status")
-    .eq("session_date", sessionDate)
-    .maybeSingle();
-
-  const nextStatus = existing?.status === "CLOSED" ? "CLOSED" : "OPEN";
+  const resolvedPayer = await resolveSessionPayerIdForDate(supabase, sessionDate);
+  const nextStatus = resolvedPayer.existingStatus === "CLOSED" ? "CLOSED" : "OPEN";
 
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
@@ -93,6 +153,7 @@ async function recomputeSessionForDate(supabase: ReturnType<typeof createClient>
       {
         session_date: sessionDate,
         status: nextStatus,
+        payer_player_id: resolvedPayer.payerPlayerId,
         start_time: aggregate.startTime,
         end_time: aggregate.endTime,
         total_fee: aggregate.totalFee,
@@ -230,16 +291,15 @@ Deno.serve(async (req) => {
     });
 
     if (sessionDate) {
-      await supabase
-        .from("sessions")
-        .upsert(
-          {
-            session_date: sessionDate,
-            status: "DRAFT",
-            updated_at: new Date().toISOString()
-          },
-          { onConflict: "session_date" }
-        );
+      try {
+        await upsertDraftSessionForDate(supabase, sessionDate);
+      } catch (draftError) {
+        const draftErrorMessage = draftError instanceof Error ? draftError.message : "session_draft_upsert_failed";
+        return new Response(JSON.stringify({ ok: false, error: draftErrorMessage }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
     }
 
     return new Response(JSON.stringify({ ok: false, error: "parse_failed" }), {
@@ -262,16 +322,15 @@ Deno.serve(async (req) => {
       parsed_location: parsed.location
     });
 
-    await supabase
-      .from("sessions")
-      .upsert(
-        {
-          session_date: parsed.sessionDate,
-          status: "DRAFT",
-          updated_at: new Date().toISOString()
-        },
-        { onConflict: "session_date" }
-      );
+    try {
+      await upsertDraftSessionForDate(supabase, parsed.sessionDate);
+    } catch (draftError) {
+      const draftErrorMessage = draftError instanceof Error ? draftError.message : "session_draft_upsert_failed";
+      return new Response(JSON.stringify({ ok: false, error: draftErrorMessage }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
 
     return new Response(JSON.stringify({ ok: false, error: "parse_failed", reason: "location_conflict" }), {
       status: 422,

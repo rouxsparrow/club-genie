@@ -9,7 +9,8 @@
 - players: predefined player roster.
 - session_participants: join table (session_id + player_id unique).
 - email_receipts: raw Gmail receipts with parse status.
-- expenses: Splitwise expense metadata per session.
+- splitwise_settings: singleton Splitwise config (`group_id`, `currency_code`, `enabled`).
+- expenses: Splitwise expense metadata per session (idempotency lock + status + payloads).
 
 ## Relationships
 - sessions 1:N courts (courts.session_id -> sessions.id)
@@ -18,6 +19,8 @@
 
 ## Status
 - sessions.status: DRAFT | OPEN | CLOSED
+- sessions.splitwise_status: PENDING | CREATED | FAILED
+- sessions.payer_player_id: explicit payer override for Splitwise (defaults to current default payer on create/backfill)
 
 ## Receipt Parse Metadata
 - email_receipts.parsed_session_date: normalized session date used for aggregation.

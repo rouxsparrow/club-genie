@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { closeSession, getClubTokenStorageKey, getSession, validateClubToken } from "../../../lib/edge";
+import { getClubTokenStorageKey, getSession, validateClubToken } from "../../../lib/edge";
 
 type GateState = "checking" | "denied" | "allowed";
 
@@ -70,6 +70,7 @@ export default function SessionDetailClient({ sessionId }: SessionDetailClientPr
   const [loading, setLoading] = useState(true);
   const [closeMessage, setCloseMessage] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -95,6 +96,15 @@ export default function SessionDetailClient({ sessionId }: SessionDetailClientPr
           return;
         }
         setGateState("allowed");
+        return fetch("/api/admin-session").catch(() => null);
+      })
+      .then(async (adminResponse) => {
+        if (adminResponse?.ok) {
+          const adminData = (await adminResponse.json()) as { ok: boolean };
+          setIsAdmin(Boolean(adminData.ok));
+        } else {
+          setIsAdmin(false);
+        }
         return getSession(token, sessionId);
       })
       .then((response) => {
@@ -114,12 +124,15 @@ export default function SessionDetailClient({ sessionId }: SessionDetailClientPr
   }, [router, sessionId]);
 
   const handleCloseSession = async () => {
-    const token = localStorage.getItem(getClubTokenStorageKey());
-    if (!token || !sessionId) return;
+    if (!sessionId) return;
     setClosing(true);
-    const result = await closeSession(token, sessionId);
+    const response = await fetch(`/api/admin/sessions/${sessionId}/close`, {
+      method: "POST",
+      credentials: "include"
+    });
+    const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
     setClosing(false);
-    setCloseMessage(result.ok ? "Session closed." : "Close failed.");
+    setCloseMessage(result?.ok ? "Session closed and Splitwise sync triggered." : result?.error ?? "Close failed.");
   };
 
   if (gateState !== "allowed") {
@@ -168,14 +181,16 @@ export default function SessionDetailClient({ sessionId }: SessionDetailClientPr
         </ul>
       )}
       <div className="mt-6 flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={handleCloseSession}
-          disabled={closing}
-          className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900"
-        >
-          {closing ? "Closing..." : "Close Session"}
-        </button>
+        {isAdmin ? (
+          <button
+            type="button"
+            onClick={handleCloseSession}
+            disabled={closing}
+            className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900"
+          >
+            {closing ? "Closing..." : "Close Session"}
+          </button>
+        ) : null}
         {closeMessage ? <p className="text-sm text-slate-500">{closeMessage}</p> : null}
       </div>
     </main>

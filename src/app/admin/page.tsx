@@ -5,18 +5,31 @@ import { useEffect, useMemo, useState } from "react";
 import AdminNavbar from "../../components/admin-navbar";
 import ThemeToggle from "../../components/theme-toggle";
 
-type TabKey = "players" | "club" | "automation" | "emails" | "gmail";
+type TabKey = "players" | "club" | "automation" | "emails" | "gmail" | "splitwise";
 
 type Player = {
   id: string;
   name: string;
   active: boolean;
+  splitwise_user_id?: number | null;
+  is_default_payer?: boolean;
 };
 
 type PlayersResponse = {
   ok: boolean;
   players?: Player[];
   error?: string;
+};
+
+type SplitwiseSettings = {
+  id: number;
+  group_id: number;
+  currency_code: string;
+  enabled: boolean;
+  description_template?: string;
+  date_format?: string;
+  location_replacements?: Array<{ from: string; to: string }>;
+  updated_at: string | null;
 };
 
 type AutomationSettings = {
@@ -120,6 +133,45 @@ export default function AdminPage() {
   const [gmailRefreshToken, setGmailRefreshToken] = useState("");
   const [gmailUpdatedAt, setGmailUpdatedAt] = useState<string | null>(null);
   const [gmailConfigSource, setGmailConfigSource] = useState<GmailConfigSource>("empty");
+  const [splitwiseSettings, setSplitwiseSettings] = useState<SplitwiseSettings | null>(null);
+  const [splitwiseGroupIdInput, setSplitwiseGroupIdInput] = useState("");
+  const [splitwiseCurrencyInput, setSplitwiseCurrencyInput] = useState("SGD");
+  const [splitwiseEnabled, setSplitwiseEnabled] = useState(true);
+  const [splitwiseDescriptionTemplate, setSplitwiseDescriptionTemplate] = useState("Badminton {session_date} - {location}");
+  const [splitwiseDateFormat, setSplitwiseDateFormat] = useState<"DD/MM/YY" | "YYYY-MM-DD">("DD/MM/YY");
+  const [splitwiseLocationMappingsText, setSplitwiseLocationMappingsText] = useState("Club Sbh East Coast @ Expo => Expo");
+  const [loadingSplitwise, setLoadingSplitwise] = useState(true);
+  const [splitwiseMessage, setSplitwiseMessage] = useState<string | null>(null);
+  const [runningSplitwise, setRunningSplitwise] = useState(false);
+  const [splitwiseTestResult, setSplitwiseTestResult] = useState<string | null>(null);
+  const [splitwiseRunSummary, setSplitwiseRunSummary] = useState<{
+    closed_updated: number;
+    splitwise_created: number;
+    splitwise_skipped: number;
+    splitwise_failed: number;
+  } | null>(null);
+  const [splitwiseRunErrors, setSplitwiseRunErrors] = useState<
+    Array<{ session_id: string; session_date?: string; code: string; message: string }>
+  >([]);
+  const [splitwiseGroupsResult, setSplitwiseGroupsResult] = useState<{ groups: unknown[]; raw: unknown } | null>(null);
+  const [splitwiseGroupDetailIdInput, setSplitwiseGroupDetailIdInput] = useState("");
+  const [splitwiseGroupDetailResult, setSplitwiseGroupDetailResult] = useState<{ group: unknown; raw: unknown } | null>(null);
+  const [splitwiseUserIdDrafts, setSplitwiseUserIdDrafts] = useState<Record<string, string>>({});
+  const [splitwiseExpenseStatusFilter, setSplitwiseExpenseStatusFilter] = useState<"ALL" | "PENDING" | "CREATED" | "FAILED">("ALL");
+  const [splitwiseExpenseRecords, setSplitwiseExpenseRecords] = useState<
+    Array<{
+      id: string;
+      session_id: string;
+      splitwise_expense_id: string | null;
+      amount: number | null;
+      status: string | null;
+      last_error: string | null;
+      updated_at: string | null;
+      created_at: string | null;
+      session?: { id: string; session_date: string; status: string | null; splitwise_status: string | null; location: string | null } | null;
+    }>
+  >([]);
+  const [loadingSplitwiseRecords, setLoadingSplitwiseRecords] = useState(false);
 
   const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
   const inactivePlayers = useMemo(() => players.filter((player) => !player.active), [players]);
@@ -156,9 +208,10 @@ export default function AdminPage() {
       fetch("/api/admin/automation-settings", { credentials: "include" }).then((response) => response.json()),
       fetch("/api/admin/receipt-errors", { credentials: "include" }).then((response) => response.json()),
       fetch("/api/admin/club-token/current", { credentials: "include" }).then((response) => response.json()),
-      fetch("/api/admin/gmail-config", { credentials: "include" }).then((response) => response.json())
+      fetch("/api/admin/gmail-config", { credentials: "include" }).then((response) => response.json()),
+      fetch("/api/admin/splitwise-settings", { credentials: "include" }).then((response) => response.json())
     ])
-      .then(([playersData, settingsData, errorsData, tokenData, gmailConfigData]) => {
+      .then(([playersData, settingsData, errorsData, tokenData, gmailConfigData, splitwiseSettingsData]) => {
         if (!isMounted) return;
         const playersPayload = playersData as PlayersResponse;
         if (playersPayload.ok) {
@@ -221,6 +274,40 @@ export default function AdminPage() {
           }
         }
         setLoadingGmailConfig(false);
+
+        const splitwisePayload = splitwiseSettingsData as { ok: boolean; settings?: SplitwiseSettings; error?: string };
+        if (splitwisePayload.ok && splitwisePayload.settings) {
+          setSplitwiseSettings(splitwisePayload.settings);
+          setSplitwiseGroupIdInput(String(splitwisePayload.settings.group_id ?? 0));
+          setSplitwiseCurrencyInput(splitwisePayload.settings.currency_code ?? "SGD");
+          setSplitwiseEnabled(Boolean(splitwisePayload.settings.enabled));
+          setSplitwiseGroupDetailIdInput(String(splitwisePayload.settings.group_id ?? 0));
+          setSplitwiseDescriptionTemplate(
+            (typeof splitwisePayload.settings.description_template === "string" && splitwisePayload.settings.description_template.trim()
+              ? splitwisePayload.settings.description_template.trim()
+              : "Badminton {session_date} - {location}") as string
+          );
+          setSplitwiseDateFormat(
+            (typeof splitwisePayload.settings.date_format === "string" && splitwisePayload.settings.date_format.trim().toUpperCase() === "YYYY-MM-DD"
+              ? "YYYY-MM-DD"
+              : "DD/MM/YY") as "DD/MM/YY" | "YYYY-MM-DD"
+          );
+          const mappings = Array.isArray(splitwisePayload.settings.location_replacements)
+            ? splitwisePayload.settings.location_replacements
+                .map((row) => {
+                  const from = typeof row?.from === "string" ? row.from.trim() : "";
+                  const to = typeof row?.to === "string" ? row.to.trim() : "";
+                  if (!from || !to) return null;
+                  return `${from} => ${to}`;
+                })
+                .filter((line): line is string => Boolean(line))
+            : [];
+          setSplitwiseLocationMappingsText(mappings.length > 0 ? mappings.join("\n") : "");
+          setSplitwiseMessage(null);
+        } else {
+          setSplitwiseMessage(splitwisePayload.error ?? "Failed to load Splitwise settings.");
+        }
+        setLoadingSplitwise(false);
       })
       .catch(() => {
         if (!isMounted) return;
@@ -232,11 +319,25 @@ export default function AdminPage() {
         setClubMessage("Failed to load current token from DB.");
         setGmailConfigMessage("Failed to load Gmail config.");
         setLoadingGmailConfig(false);
+        setSplitwiseMessage("Failed to load Splitwise settings.");
+        setLoadingSplitwise(false);
       });
     return () => {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    // Initialize draft inputs from loaded players once, but allow user edits to persist locally.
+    setSplitwiseUserIdDrafts((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      const next: Record<string, string> = {};
+      players.forEach((player) => {
+        next[player.id] = typeof player.splitwise_user_id === "number" ? String(player.splitwise_user_id) : "";
+      });
+      return next;
+    });
+  }, [players]);
 
   const refreshPlayers = async () => {
     setLoadingPlayers(true);
@@ -466,6 +567,237 @@ export default function AdminPage() {
     setActionMessage(active ? "Player reactivated." : "Player deactivated.");
   };
 
+  const updatePlayerSplitwiseUserId = async (playerId: string, value: string) => {
+    setActionMessage(null);
+    setSplitwiseUserIdDrafts((prev) => ({ ...prev, [playerId]: value }));
+    const trimmed = value.trim();
+    const response = await fetch(`/api/admin/players/${playerId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ splitwiseUserId: trimmed ? trimmed : null })
+    });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; player?: Player; error?: string } | null;
+    if (!data?.ok || !data.player) {
+      setActionMessage(data?.error ?? "Failed to update Splitwise user id.");
+      return;
+    }
+    setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, splitwise_user_id: data.player?.splitwise_user_id ?? null } : p)));
+    setSplitwiseUserIdDrafts((prev) => ({
+      ...prev,
+      [playerId]: typeof data.player?.splitwise_user_id === "number" ? String(data.player.splitwise_user_id) : ""
+    }));
+    setActionMessage("Splitwise user id updated.");
+  };
+
+  const setDefaultPayer = async (playerId: string, enabled: boolean) => {
+    setActionMessage(null);
+    const response = await fetch(`/api/admin/players/${playerId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ isDefaultPayer: enabled })
+    });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; player?: Player; error?: string } | null;
+    if (!data?.ok || !data.player) {
+      setActionMessage(data?.error ?? "Failed to update default payer.");
+      return;
+    }
+    setPlayers((prev) =>
+      prev.map((p) => {
+        if (enabled) {
+          return { ...p, is_default_payer: p.id === playerId };
+        }
+        if (p.id === playerId) return { ...p, is_default_payer: false };
+        return p;
+      })
+    );
+    setActionMessage(enabled ? "Default payer updated." : "Default payer cleared.");
+  };
+
+  const saveSplitwiseSettings = async () => {
+    setSplitwiseMessage(null);
+    const locationReplacements = splitwiseLocationMappingsText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [fromRaw, toRaw] = line.split("=>");
+        const from = (fromRaw ?? "").trim();
+        const to = (toRaw ?? "").trim();
+        if (!from || !to) return null;
+        return { from, to };
+      })
+      .filter((row): row is { from: string; to: string } => Boolean(row));
+
+    const response = await fetch("/api/admin/splitwise-settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        groupId: splitwiseGroupIdInput,
+        currencyCode: splitwiseCurrencyInput,
+        enabled: splitwiseEnabled,
+        descriptionTemplate: splitwiseDescriptionTemplate,
+        dateFormat: splitwiseDateFormat,
+        locationReplacements
+      })
+    });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; settings?: SplitwiseSettings; error?: string } | null;
+    if (!data?.ok || !data.settings) {
+      setSplitwiseMessage(data?.error ?? "Failed to save Splitwise settings.");
+      return;
+    }
+    setSplitwiseSettings(data.settings);
+    setSplitwiseGroupIdInput(String(data.settings.group_id ?? 0));
+    setSplitwiseCurrencyInput(data.settings.currency_code ?? "SGD");
+    setSplitwiseEnabled(Boolean(data.settings.enabled));
+    setSplitwiseGroupDetailIdInput(String(data.settings.group_id ?? 0));
+    setSplitwiseDescriptionTemplate(
+      (typeof data.settings.description_template === "string" && data.settings.description_template.trim()
+        ? data.settings.description_template.trim()
+        : "Badminton {session_date} - {location}") as string
+    );
+    setSplitwiseDateFormat(
+      (typeof data.settings.date_format === "string" && data.settings.date_format.trim().toUpperCase() === "YYYY-MM-DD"
+        ? "YYYY-MM-DD"
+        : "DD/MM/YY") as "DD/MM/YY" | "YYYY-MM-DD"
+    );
+    const mappings = Array.isArray(data.settings.location_replacements)
+      ? data.settings.location_replacements
+          .map((row) => {
+            const from = typeof row?.from === "string" ? row.from.trim() : "";
+            const to = typeof row?.to === "string" ? row.to.trim() : "";
+            if (!from || !to) return null;
+            return `${from} => ${to}`;
+          })
+          .filter((line): line is string => Boolean(line))
+      : [];
+    setSplitwiseLocationMappingsText(mappings.length > 0 ? mappings.join("\n") : "");
+    setSplitwiseMessage("Splitwise settings saved.");
+  };
+
+  const testSplitwise = async () => {
+    setSplitwiseTestResult(null);
+    const response = await fetch("/api/admin/splitwise/test", {
+      method: "POST",
+      credentials: "include"
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { ok?: boolean; currentUser?: { id?: number | null; first_name?: string | null; last_name?: string | null }; error?: string }
+      | null;
+    if (!data?.ok) {
+      setSplitwiseTestResult(data?.error ?? "Splitwise test failed.");
+      return;
+    }
+    const id = data.currentUser?.id ?? null;
+    const name = [data.currentUser?.first_name, data.currentUser?.last_name].filter(Boolean).join(" ");
+    setSplitwiseTestResult(`Connected as ${name || "user"}${id ? ` (id ${id})` : ""}.`);
+  };
+
+  const runSplitwiseNow = async () => {
+    setRunningSplitwise(true);
+    setSplitwiseMessage(null);
+    setSplitwiseRunErrors([]);
+    const response = await fetch("/api/admin/splitwise/run", {
+      method: "POST",
+      credentials: "include"
+    });
+    const data = (await response.json().catch(() => null)) as
+      | {
+          ok?: boolean;
+          closed_updated?: number;
+          splitwise_created?: number;
+          splitwise_skipped?: number;
+          splitwise_failed?: number;
+          errors?: Array<{ session_id: string; session_date?: string; code: string; message: string }>;
+          error?: string;
+        }
+      | null;
+    if (!data?.ok) {
+      setSplitwiseMessage(data?.error ?? "Splitwise sync failed.");
+      setRunningSplitwise(false);
+      return;
+    }
+    setSplitwiseRunSummary({
+      closed_updated: data.closed_updated ?? 0,
+      splitwise_created: data.splitwise_created ?? 0,
+      splitwise_skipped: data.splitwise_skipped ?? 0,
+      splitwise_failed: data.splitwise_failed ?? 0
+    });
+    setSplitwiseRunErrors(Array.isArray(data.errors) ? data.errors : []);
+    setSplitwiseMessage("Splitwise sync completed.");
+    setRunningSplitwise(false);
+  };
+
+  const fetchSplitwiseGroups = async () => {
+    setSplitwiseMessage(null);
+    setSplitwiseGroupsResult(null);
+    const response = await fetch("/api/admin/splitwise/groups", { credentials: "include" });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; groups?: unknown[]; raw?: unknown; error?: string } | null;
+    if (!data?.ok) {
+      setSplitwiseMessage(data?.error ?? "Failed to fetch groups.");
+      return;
+    }
+    setSplitwiseGroupsResult({ groups: Array.isArray(data.groups) ? data.groups : [], raw: data.raw ?? null });
+  };
+
+  const fetchSplitwiseGroupDetail = async () => {
+    setSplitwiseMessage(null);
+    setSplitwiseGroupDetailResult(null);
+    const raw = splitwiseGroupDetailIdInput.trim() || splitwiseGroupIdInput.trim();
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      setSplitwiseMessage("Provide a valid group id.");
+      return;
+    }
+    const response = await fetch(`/api/admin/splitwise/groups/${parsed}`, { credentials: "include" });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; group?: unknown; raw?: unknown; error?: string } | null;
+    if (!data?.ok) {
+      setSplitwiseMessage(data?.error ?? "Failed to fetch group detail.");
+      return;
+    }
+    setSplitwiseGroupDetailResult({ group: data.group ?? null, raw: data.raw ?? null });
+  };
+
+  const loadSplitwiseRecords = async () => {
+    setLoadingSplitwiseRecords(true);
+    setSplitwiseMessage(null);
+    const qs = new URLSearchParams();
+    if (splitwiseExpenseStatusFilter !== "ALL") {
+      qs.set("status", splitwiseExpenseStatusFilter);
+    }
+    qs.set("limit", "50");
+    const response = await fetch(`/api/admin/splitwise/expenses?${qs.toString()}`, { credentials: "include" });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; records?: unknown[]; error?: string } | null;
+    if (!data?.ok) {
+      setSplitwiseMessage(data?.error ?? "Failed to load Splitwise records.");
+      setLoadingSplitwiseRecords(false);
+      return;
+    }
+    setSplitwiseExpenseRecords(Array.isArray(data.records) ? (data.records as typeof splitwiseExpenseRecords) : []);
+    setLoadingSplitwiseRecords(false);
+  };
+
+  const deleteSplitwiseRecord = async (sessionId: string) => {
+    setSplitwiseMessage(null);
+    const confirmed = window.confirm(
+      "Delete this Splitwise record from our DB?\n\nIf the record was already created in Splitwise, we will keep the session status as CREATED to avoid duplicates."
+    );
+    if (!confirmed) return;
+    const response = await fetch(`/api/admin/splitwise/expenses/${sessionId}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!data?.ok) {
+      setSplitwiseMessage(data?.error ?? "Failed to delete Splitwise record.");
+      return;
+    }
+    await loadSplitwiseRecords();
+    setSplitwiseMessage("Splitwise record deleted from DB.");
+  };
+
   const handleRotateToken = async () => {
     setIsRotating(true);
     setRotationError(null);
@@ -585,6 +917,17 @@ export default function AdminPage() {
         >
           Gmail Config
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("splitwise")}
+          className={`rounded-full px-4 py-2 text-sm font-semibold ${
+            activeTab === "splitwise"
+              ? "bg-emerald-500 text-slate-900"
+              : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
+          }`}
+        >
+          Splitwise
+        </button>
       </nav>
 
       {activeTab === "players" ? (
@@ -655,23 +998,52 @@ export default function AdminPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <strong>{player.name}</strong>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => startRename(player)}
-                              className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
-                            >
-                              Rename
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setPlayerActive(player.id, false)}
-                              className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
-                            >
-                              Deactivate
-                            </button>
+                        <div className="grid gap-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <strong>{player.name}</strong>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => startRename(player)}
+                                className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
+                              >
+                                Rename
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPlayerActive(player.id, false)}
+                                className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
+                              >
+                                Deactivate
+                              </button>
+                            </div>
+                          </div>
+                          <div className="grid gap-3 rounded-2xl border border-slate-200/60 bg-slate-50 p-3 text-xs dark:border-ink-700/60 dark:bg-ink-900/30 md:grid-cols-2">
+                            <label className="font-semibold">
+                              Splitwise User ID
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                value={
+                                  splitwiseUserIdDrafts[player.id] ??
+                                  (typeof player.splitwise_user_id === "number" ? String(player.splitwise_user_id) : "")
+                                }
+                                onChange={(event) =>
+                                  setSplitwiseUserIdDrafts((prev) => ({ ...prev, [player.id]: event.target.value }))
+                                }
+                                onBlur={(event) => updatePlayerSplitwiseUserId(player.id, event.target.value)}
+                                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                                placeholder="e.g. 54123"
+                              />
+                            </label>
+                            <label className="flex items-center gap-2 font-semibold">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(player.is_default_payer)}
+                                onChange={(event) => setDefaultPayer(player.id, event.target.checked)}
+                              />
+                              Default payer
+                            </label>
                           </div>
                         </div>
                       )}
@@ -963,6 +1335,329 @@ export default function AdminPage() {
                 {savingGmailConfig ? "Saving..." : "Save Gmail Config"}
               </button>
             </div>
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "splitwise" ? (
+        <section className="mt-8 grid gap-6">
+          <div className="card">
+            <h2 className="text-2xl font-semibold">Splitwise</h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
+              Configure group settings, map players to Splitwise user IDs, and run the daily sync manually.
+            </p>
+            {splitwiseMessage ? <p className="mt-3 text-sm text-slate-500">{splitwiseMessage}</p> : null}
+            {splitwiseTestResult ? <p className="mt-2 text-sm text-slate-500">{splitwiseTestResult}</p> : null}
+
+            {loadingSplitwise ? (
+              <p className="mt-4 text-sm text-slate-500">Loading Splitwise settings...</p>
+            ) : (
+              <div className="mt-4 grid gap-4 md:grid-cols-3">
+                <label className="text-sm font-semibold">
+                  Group ID
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    value={splitwiseGroupIdInput}
+                    onChange={(event) => setSplitwiseGroupIdInput(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                    placeholder="e.g. 12345"
+                  />
+                </label>
+                <label className="text-sm font-semibold">
+                  Currency
+                  <input
+                    type="text"
+                    value={splitwiseCurrencyInput}
+                    onChange={(event) => setSplitwiseCurrencyInput(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                    placeholder="SGD"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={splitwiseEnabled}
+                    onChange={(event) => setSplitwiseEnabled(event.target.checked)}
+                  />
+                  Enabled
+                </label>
+              </div>
+            )}
+
+            <label className="mt-4 block text-sm font-semibold">
+              Expense description template
+              <textarea
+                value={splitwiseDescriptionTemplate}
+                onChange={(event) => setSplitwiseDescriptionTemplate(event.target.value)}
+                rows={2}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                placeholder="Badminton {session_date} - {location}"
+              />
+              <span className="mt-2 block text-xs text-slate-400">
+                Placeholders: <code>{"{session_date}"}</code>, <code>{"{location}"}</code>
+              </span>
+            </label>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <label className="text-sm font-semibold">
+                Session date format
+                <select
+                  value={splitwiseDateFormat}
+                  onChange={(event) => setSplitwiseDateFormat(event.target.value as "DD/MM/YY" | "YYYY-MM-DD")}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                >
+                  <option value="DD/MM/YY">DD/MM/YY (01/02/26)</option>
+                  <option value="YYYY-MM-DD">YYYY-MM-DD (2026-02-01)</option>
+                </select>
+              </label>
+              <label className="text-sm font-semibold">
+                Location mappings
+                <textarea
+                  value={splitwiseLocationMappingsText}
+                  onChange={(event) => setSplitwiseLocationMappingsText(event.target.value)}
+                  rows={4}
+                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                  placeholder={"Club Sbh East Coast @ Expo => Expo"}
+                />
+                <span className="mt-2 block text-xs text-slate-400">One per line, format: <code>{"from => to"}</code> (case-insensitive substring replace).</span>
+              </label>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={saveSplitwiseSettings}
+                disabled={loadingSplitwise}
+                className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"
+              >
+                Save Settings
+              </button>
+              <button
+                type="button"
+                onClick={testSplitwise}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+              >
+                Test Splitwise Connection
+              </button>
+              <button
+                type="button"
+                onClick={runSplitwiseNow}
+                disabled={runningSplitwise}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100 disabled:opacity-60"
+              >
+                {runningSplitwise ? "Running..." : "Run Splitwise Sync Now"}
+              </button>
+            </div>
+
+            {splitwiseRunSummary ? (
+              <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200/80 p-4 text-sm dark:border-ink-700/60 md:grid-cols-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Closed</p>
+                  <p className="font-semibold">{splitwiseRunSummary.closed_updated}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Created</p>
+                  <p className="font-semibold">{splitwiseRunSummary.splitwise_created}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Skipped</p>
+                  <p className="font-semibold">{splitwiseRunSummary.splitwise_skipped}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Failed</p>
+                  <p className="font-semibold">{splitwiseRunSummary.splitwise_failed}</p>
+                </div>
+              </div>
+            ) : null}
+
+            {splitwiseRunErrors.length > 0 ? (
+              <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200/80 dark:border-ink-700/60">
+                <div className="border-b border-slate-200/70 bg-slate-100/70 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-ink-700/60 dark:bg-ink-900/40 dark:text-slate-300">
+                  Splitwise Errors ({splitwiseRunErrors.length})
+                </div>
+                <div className="divide-y divide-slate-200/70 text-sm dark:divide-ink-700/60">
+                  {splitwiseRunErrors.map((entry) => (
+                    <div key={`${entry.session_id}:${entry.code}`} className="grid gap-2 px-4 py-3 md:grid-cols-4">
+                      <a href={`/sessions/${entry.session_id}`} className="font-semibold text-emerald-600 hover:underline">
+                        {entry.session_id.slice(0, 8)}
+                      </a>
+                      <div className="text-slate-600 dark:text-slate-300">{entry.session_date ?? "-"}</div>
+                      <div className="text-slate-600 dark:text-slate-300">{entry.code}</div>
+                      <div className="text-slate-600 dark:text-slate-300">{entry.message}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-6 rounded-2xl border border-slate-200/80 p-4 text-sm dark:border-ink-700/60">
+              <h3 className="text-lg font-semibold">Group Tools</h3>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
+                Fetch groups via Splitwise API to find the correct group id.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={fetchSplitwiseGroups}
+                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+                >
+                  Get All Groups
+                </button>
+                <div className="flex flex-wrap items-center gap-3">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    value={splitwiseGroupDetailIdInput}
+                    onChange={(event) => setSplitwiseGroupDetailIdInput(event.target.value)}
+                    className="w-40 rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                    placeholder="Group id"
+                  />
+                  <button
+                    type="button"
+                    onClick={fetchSplitwiseGroupDetail}
+                    className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+                  >
+                    Get Group Detail
+                  </button>
+                </div>
+              </div>
+
+              {splitwiseGroupsResult ? (
+                <div className="mt-4 grid gap-3">
+                  <div className="rounded-2xl border border-slate-200/70 bg-slate-50 p-3 text-sm dark:border-ink-700/60 dark:bg-ink-900/30">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Groups</p>
+                    <ul className="mt-2 space-y-1">
+                      {splitwiseGroupsResult.groups.map((group, idx) => {
+                        const g = group as { id?: unknown; name?: unknown };
+                        const id = typeof g?.id === "number" || typeof g?.id === "string" ? String(g.id) : `#${idx + 1}`;
+                        const name = typeof g?.name === "string" ? g.name : "Group";
+                        return (
+                          <li key={id} className="flex items-center justify-between gap-3">
+                            <span className="font-semibold">{name}</span>
+                            <code className="text-xs text-slate-500">{id}</code>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                  <details className="rounded-2xl border border-slate-200/70 bg-white p-3 text-xs dark:border-ink-700/60 dark:bg-ink-900/30">
+                    <summary className="cursor-pointer font-semibold text-slate-600 dark:text-slate-200">Raw JSON</summary>
+                    <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-slate-600 dark:text-slate-300">
+                      {JSON.stringify(splitwiseGroupsResult.raw, null, 2)}
+                    </pre>
+                  </details>
+                </div>
+              ) : null}
+
+              {splitwiseGroupDetailResult ? (
+                <details className="mt-4 rounded-2xl border border-slate-200/70 bg-white p-3 text-xs dark:border-ink-700/60 dark:bg-ink-900/30" open>
+                  <summary className="cursor-pointer font-semibold text-slate-600 dark:text-slate-200">Group Detail JSON</summary>
+                  <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words text-slate-600 dark:text-slate-300">
+                    {JSON.stringify(splitwiseGroupDetailResult.raw ?? splitwiseGroupDetailResult.group, null, 2)}
+                  </pre>
+                </details>
+              ) : null}
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-slate-200/80 p-4 text-sm dark:border-ink-700/60">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">Splitwise Records</h3>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
+                    These come from our local <code>expenses</code> table (idempotency + debug).
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <select
+                    value={splitwiseExpenseStatusFilter}
+                    onChange={(event) =>
+                      setSplitwiseExpenseStatusFilter(event.target.value as "ALL" | "PENDING" | "CREATED" | "FAILED")
+                    }
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                  >
+                    <option value="ALL">All</option>
+                    <option value="PENDING">PENDING</option>
+                    <option value="CREATED">CREATED</option>
+                    <option value="FAILED">FAILED</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={loadSplitwiseRecords}
+                    className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+                  >
+                    {loadingSplitwiseRecords ? "Loading..." : "Load Records"}
+                  </button>
+                </div>
+              </div>
+
+              {splitwiseExpenseRecords.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">{loadingSplitwiseRecords ? "" : "No records loaded yet."}</p>
+              ) : (
+                <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-ink-700/60">
+                  <table className="min-w-[900px] w-full text-left text-sm">
+                    <thead className="bg-slate-100/70 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-ink-900/40 dark:text-slate-300">
+                      <tr>
+                        <th className="px-4 py-3">Session</th>
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3">Splitwise ID</th>
+                        <th className="px-4 py-3">Amount</th>
+                        <th className="px-4 py-3">Last Error</th>
+                        <th className="px-4 py-3">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200/70 dark:divide-ink-700/60">
+                      {splitwiseExpenseRecords.map((row) => {
+                        const sessionId = row.session_id;
+                        const isCreatedWithRemoteId = row.status === "CREATED" && Boolean(row.splitwise_expense_id);
+                        return (
+                          <tr key={row.id}>
+                            <td className="px-4 py-3">
+                              <a href={`/sessions/${sessionId}`} className="font-semibold text-emerald-600 hover:underline">
+                                {sessionId.slice(0, 8)}
+                              </a>
+                              {row.session?.location ? (
+                                <div className="mt-1 text-xs text-slate-500">{row.session.location}</div>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-3">{row.session?.session_date ?? "-"}</td>
+                            <td className="px-4 py-3">{row.status ?? "-"}</td>
+                            <td className="px-4 py-3">
+                              {row.splitwise_expense_id ? <code className="text-xs">{row.splitwise_expense_id}</code> : "-"}
+                            </td>
+                            <td className="px-4 py-3">{typeof row.amount === "number" ? row.amount.toFixed(2) : "-"}</td>
+                            <td className="px-4 py-3">
+                              {row.last_error ? <span className="text-xs text-rose-600">{row.last_error}</span> : "-"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <button
+                                type="button"
+                                onClick={() => deleteSplitwiseRecord(sessionId)}
+                                className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 disabled:opacity-50 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
+                                title={
+                                  isCreatedWithRemoteId
+                                    ? "Delete local record only. Session stays CREATED to avoid duplicate expenses."
+                                    : "Delete local record and reset session to PENDING."
+                                }
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {splitwiseSettings?.updated_at ? (
+              <p className="mt-2 text-xs text-slate-400">
+                Last updated: {new Date(splitwiseSettings.updated_at).toLocaleString()}
+              </p>
+            ) : null}
           </div>
         </section>
       ) : null}

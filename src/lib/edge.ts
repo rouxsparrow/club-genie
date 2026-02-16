@@ -61,6 +61,8 @@ type SessionSummary = {
   id: string;
   session_date: string;
   status: string;
+  splitwise_status?: string | null;
+  payer_player_id?: string | null;
   start_time: string | null;
   end_time: string | null;
   total_fee: number | null;
@@ -184,29 +186,6 @@ export function joinSession(token: string, payload: JoinWithdrawPayload) {
 
 export function withdrawSession(token: string, payload: JoinWithdrawPayload) {
   return postJoinWithdraw(token, "withdraw-session", payload);
-}
-
-type CloseSessionResponse = {
-  ok: boolean;
-  error?: string;
-};
-
-export async function closeSession(token: string, sessionId: string): Promise<CloseSessionResponse> {
-  const url = `${getEdgeFunctionBaseUrl()}/close-session`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      ...buildEdgeHeaders(token),
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({ sessionId })
-  });
-
-  if (!response.ok) {
-    return { ok: false };
-  }
-
-  return (await response.json()) as CloseSessionResponse;
 }
 
 type ReceiptError = {

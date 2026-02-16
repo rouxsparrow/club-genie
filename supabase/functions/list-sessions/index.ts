@@ -88,6 +88,18 @@ Deno.serve(async (req) => {
   }
 
   const selectCandidates = [
+    "id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, location, remarks",
+    "id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, remarks",
+    "id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, location",
+    "id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee",
+    "id, session_date, status, splitwise_status, start_time, end_time, total_fee, location, remarks",
+    "id, session_date, status, splitwise_status, start_time, end_time, total_fee, remarks",
+    "id, session_date, status, splitwise_status, start_time, end_time, total_fee, location",
+    "id, session_date, status, splitwise_status, start_time, end_time, total_fee",
+    "id, session_date, status, payer_player_id, start_time, end_time, total_fee, location, remarks",
+    "id, session_date, status, payer_player_id, start_time, end_time, total_fee, remarks",
+    "id, session_date, status, payer_player_id, start_time, end_time, total_fee, location",
+    "id, session_date, status, payer_player_id, start_time, end_time, total_fee",
     "id, session_date, status, start_time, end_time, total_fee, location, remarks",
     "id, session_date, status, start_time, end_time, total_fee, remarks",
     "id, session_date, status, start_time, end_time, total_fee, location",
@@ -97,7 +109,12 @@ Deno.serve(async (req) => {
   let sessionsQuery = await supabase.from("sessions").select(selectCandidates[0]).order("session_date", { ascending: true });
   for (let i = 1; i < selectCandidates.length && sessionsQuery.error; i += 1) {
     const message = sessionsQuery.error.message ?? "";
-    if (!message.includes("location") && !message.includes("remarks")) {
+    if (
+      !message.includes("location") &&
+      !message.includes("remarks") &&
+      !message.includes("splitwise_status") &&
+      !message.includes("payer_player_id")
+    ) {
       break;
     }
     sessionsQuery = await supabase.from("sessions").select(selectCandidates[i]).order("session_date", { ascending: true });
@@ -106,7 +123,9 @@ Deno.serve(async (req) => {
   const sessions = (sessionsQuery.data ?? []).map((session) => ({
     ...session,
     location: "location" in session ? session.location : null,
-    remarks: "remarks" in session ? session.remarks : null
+    remarks: "remarks" in session ? session.remarks : null,
+    splitwise_status: "splitwise_status" in session ? session.splitwise_status : null,
+    payer_player_id: "payer_player_id" in session ? session.payer_player_id : null
   }));
 
   if (sessionsQuery.error) {

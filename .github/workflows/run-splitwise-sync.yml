@@ -1,0 +1,41 @@
+name: Run Splitwise Sync
+
+on:
+  schedule:
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+jobs:
+  run-splitwise-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Supabase run-splitwise-sync function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          AUTOMATION_SECRET: ${{ secrets.AUTOMATION_SECRET }}
+        run: |
+          if [ -z "${SUPABASE_URL}" ] || [ -z "${SUPABASE_ANON_KEY}" ] || [ -z "${AUTOMATION_SECRET}" ]; then
+            echo "Missing required secrets."
+            exit 1
+          fi
+
+          response=$(curl -sS -w "\n%{http_code}" -X POST "${SUPABASE_URL%/}/functions/v1/run-splitwise-sync" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "x-automation-secret: ${AUTOMATION_SECRET}" \
+            -H "content-type: application/json" \
+            --data '{}')
+
+          body=$(echo "${response}" | sed '$d')
+          status=$(echo "${response}" | tail -n1)
+
+          echo "HTTP ${status}"
+          echo "${body}"
+
+          if [ "${status}" -ge 400 ]; then
+            exit 1
+          fi
+
+          echo "${body}" | grep -q '"ok":true'
+

@@ -71,7 +71,13 @@
 - [x] Add session close UI + wiring.
 - [x] Add list-players Edge Function + seed players.
 - [x] Verify join/withdraw end-to-end with seeded players.
-- [ ] Splitwise integration (API calls + expense idempotency).
+- [x] Splitwise integration (API calls + expense idempotency) + daily close/sync cron + admin settings/mapping UI (tests: `tests/splitwise-utils.test.ts`; manual browser check required for admin Splitwise tab and session badges).
+- [x] Splitwise admin UX follow-ups: per-session error table after sync, DB-backed description template, groups fetch tools (`get_groups`/`get_group`), Players mapping without full refresh, and Splitwise badge stacked under Status on Sessions page (tests: `tests/splitwise-utils.test.ts`; manual browser check required for admin Splitwise tab and group tools).
+- [x] Dev-only admin session delete (UI + admin API). Test rationale: guarded by `NODE_ENV==='development'`, exercised manually in browser; covered by `npm run lint` + `npm run typecheck`.
+- [x] Splitwise expense description enhancements: session date formatting + location replacement mapping in `splitwise_settings`, wired through admin UI and Edge sync (tests: `tests/splitwise-utils.test.ts`).
+- [x] Admin Splitwise records viewer + delete (local `expenses` table) with guard against deleting CREATED+Splitwise-ID records (test rationale: covered by `npm run lint` + `npm run typecheck`; manual browser check required).
+- [x] Session payer override: explicit `sessions.payer_player_id` defaulted from global default payer across create/edit/ingestion + Splitwise payer precedence update (test rationale: covered by `npm test` + `npm run lint` + `npm run typecheck`; manual browser check required for edit-modal payer dropdown and Splitwise payer override behavior).
+- [x] Fix payer reopen behavior by redeploying `list-sessions` with `payer_player_id` in response, and switch Splitwise payload `date` to API runtime `now` (test rationale: covered by `npm run lint` + `npm run typecheck`; verified via direct Edge response showing `payer_player_id` on sessions).
 - [x] Add Vitest coverage for admin session cookie signing and token hashing (required by MVP).
 - [x] Add admin session cookie signing tests.
 - [x] Add token hashing helper tests.

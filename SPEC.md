@@ -30,6 +30,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - On parse failure, create a DRAFT session and notify admin via in-app admin error queue.
 - Public users can join or withdraw from OPEN sessions, including multi-player registration.
 - Admin can edit session details and fix DRAFT sessions.
+- Admin can set a per-session Splitwise payer override from session edit; new sessions default to the current default payer.
 - Admin can manage players (add, rename, deactivate/reactivate).
 - Admin can close sessions immediately and trigger Splitwise expense recording.
 - Admin can rotate the club access token and share a new invite link.

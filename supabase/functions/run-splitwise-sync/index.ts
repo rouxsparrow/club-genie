@@ -6,10 +6,11 @@ import {
   parseMoneyToCents,
   renderDescriptionTemplate
 } from "../_shared/splitwise-utils.ts";
+import { finalizeRunHistory, resolveRunSource, startRunHistory } from "../_shared/run-history.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, x-automation-secret, content-type"
+  "Access-Control-Allow-Headers": "authorization, apikey, x-automation-secret, x-run-source, content-type"
 };
 
 type SplitwiseSettingsRow = {
@@ -27,6 +28,7 @@ type SessionRow = {
   status: string;
   splitwise_status?: string | null;
   payer_player_id?: string | null;
+  guest_count?: number | null;
   total_fee?: unknown;
   location?: string | null;
   start_time?: string | null;
@@ -58,6 +60,13 @@ function isWithinRecentWindow(updatedAtIso: string | null, minutes: number) {
 function computeExpenseDateIso() {
   // Use API runtime "now" as requested for Splitwise expense date.
   return new Date().toISOString();
+}
+
+function normalizeGuestCount(value: unknown) {
+  if (typeof value !== "number" || !Number.isInteger(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 20) return 20;
+  return value;
 }
 
 async function getSupabaseClient() {
@@ -313,6 +322,12 @@ Deno.serve(async (req) => {
   const sessionIds =
     Array.isArray(body?.sessionIds) ? body?.sessionIds.filter((v) => typeof v === "string" && v.trim()) : null;
   const dryRun = body?.dryRun === true;
+  const runSource = resolveRunSource(req.headers.get("x-run-source"));
+  const run = await startRunHistory(supabase, {
+    jobType: "SPLITWISE",
+    runSource,
+    requestPayload: body ?? {}
+  });
 
   const { startDateSgt, endDateSgt } = computeSgtDateWindowLast24h(new Date());
 
@@ -322,6 +337,28 @@ Deno.serve(async (req) => {
   let splitwiseSkipped = 0;
   let splitwiseFailed = 0;
   const errors: Array<{ session_id: string; session_date: string; code: string; message: string }> = [];
+  const buildSummary = () => ({
+    window: { startDateSgt, endDateSgt },
+    closed_updated: closedUpdated,
+    close_skipped: closeSkipped,
+    splitwise_created: splitwiseCreated,
+    splitwise_skipped: splitwiseSkipped,
+    splitwise_failed: splitwiseFailed,
+    errors: errors.slice(0, 50)
+  });
+  const respondWithHistory = async (
+    statusCode: number,
+    payload: Record<string, unknown>,
+    historyStatus: "SUCCESS" | "FAILED" | "SKIPPED",
+    errorMessage?: string
+  ) => {
+    await finalizeRunHistory(supabase, run, {
+      status: historyStatus,
+      summary: buildSummary(),
+      errorMessage: errorMessage ?? null
+    });
+    return json(statusCode, payload);
+  };
 
   const settings = await loadSplitwiseSettings(supabase);
   const apiKey = Deno.env.get("SPLITWISE_API_KEY") ?? null;
@@ -335,7 +372,7 @@ Deno.serve(async (req) => {
       .lte("session_date", endDateSgt);
 
     if (openError) {
-      return json(500, { ok: false, error: "close_lookup_failed" });
+      return await respondWithHistory(500, { ok: false, error: "close_lookup_failed" }, "FAILED", "close_lookup_failed");
     }
 
     const ids = (openSessions ?? []).map((row) => row.id).filter(Boolean);
@@ -350,26 +387,65 @@ Deno.serve(async (req) => {
         .in("id", ids)
         .select("id");
       if (closeError) {
-        return json(500, { ok: false, error: "close_update_failed" });
+        return await respondWithHistory(500, { ok: false, error: "close_update_failed" }, "FAILED", "close_update_failed");
       }
       closedUpdated = (updated ?? []).length;
     }
   }
 
-  const candidatesQuery = supabase
+  const candidateSelects = [
+    "id,session_date,status,splitwise_status,payer_player_id,guest_count,total_fee,location,start_time,end_time",
+    "id,session_date,status,splitwise_status,payer_player_id,total_fee,location,start_time,end_time"
+  ] as const;
+
+  let candidatesResult = await supabase
     .from("sessions")
-    .select("id,session_date,status,splitwise_status,payer_player_id,total_fee,location,start_time,end_time")
+    .select(candidateSelects[0])
     .eq("status", "CLOSED")
     .lte("session_date", endDateSgt)
     .in("splitwise_status", ["PENDING", "FAILED"]);
+  if (sessionIds) {
+    candidatesResult = await supabase
+      .from("sessions")
+      .select(candidateSelects[0])
+      .eq("status", "CLOSED")
+      .lte("session_date", endDateSgt)
+      .in("splitwise_status", ["PENDING", "FAILED"])
+      .in("id", sessionIds);
+  }
 
-  const candidatesResult = sessionIds
-    ? await candidatesQuery.in("id", sessionIds)
-    : await candidatesQuery;
-
-  const sessions = (candidatesResult.data ?? []) as SessionRow[];
   if (candidatesResult.error) {
-    return json(500, { ok: false, error: "candidate_lookup_failed" });
+    const message = candidatesResult.error.message ?? "";
+    if (message.includes("guest_count")) {
+      candidatesResult = await supabase
+        .from("sessions")
+        .select(candidateSelects[1])
+        .eq("status", "CLOSED")
+        .lte("session_date", endDateSgt)
+        .in("splitwise_status", ["PENDING", "FAILED"]);
+      if (sessionIds) {
+        candidatesResult = await supabase
+          .from("sessions")
+          .select(candidateSelects[1])
+          .eq("status", "CLOSED")
+          .lte("session_date", endDateSgt)
+          .in("splitwise_status", ["PENDING", "FAILED"])
+          .in("id", sessionIds);
+      }
+    }
+  }
+
+  const sessions = ((candidatesResult.data ?? []) as SessionRow[]).map((session) => ({
+    ...session,
+    guest_count: normalizeGuestCount(session.guest_count)
+  }));
+  if (candidatesResult.error) {
+    return await respondWithHistory(
+      500,
+      { ok: false, error: "candidate_lookup_failed" },
+      "FAILED",
+      "candidate_lookup_failed"
+    );
   }
 
   for (const session of sessions) {
@@ -470,7 +546,8 @@ Deno.serve(async (req) => {
       costCents,
       dateIso,
       payerUserId: payer.splitwiseUserId,
-      participantUserIds
+      participantUserIds,
+      guestCount: normalizeGuestCount(session.guest_count)
     });
 
     if (!built.ok) {
@@ -529,14 +606,19 @@ Deno.serve(async (req) => {
     await supabase.from("sessions").update({ splitwise_status: "CREATED", updated_at: new Date().toISOString() }).eq("id", sessionId);
   }
 
+  const summary = buildSummary();
+  const historyStatus =
+    !settings.enabled ? "SKIPPED"
+    : splitwiseFailed > 0 ? "FAILED"
+    : "SUCCESS";
+  await finalizeRunHistory(supabase, run, {
+    status: historyStatus,
+    summary,
+    errorMessage: historyStatus === "FAILED" ? "splitwise_sync_failed" : null
+  });
+
   return json(200, {
     ok: true,
-    window: { startDateSgt, endDateSgt },
-    closed_updated: closedUpdated,
-    close_skipped: closeSkipped,
-    splitwise_created: splitwiseCreated,
-    splitwise_skipped: splitwiseSkipped,
-    splitwise_failed: splitwiseFailed,
-    errors: errors.slice(0, 50)
+    ...summary
   });
 });

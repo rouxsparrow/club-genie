@@ -98,6 +98,22 @@ Deno.serve(async (req) => {
   }
 
   const selectCandidates = [
+    "id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee, location, remarks",
+    "id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee, remarks",
+    "id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee, location",
+    "id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee",
+    "id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee, location, remarks",
+    "id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee, remarks",
+    "id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee, location",
+    "id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee",
+    "id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee, location, remarks",
+    "id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee, remarks",
+    "id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee, location",
+    "id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee",
+    "id, session_date, status, guest_count, start_time, end_time, total_fee, location, remarks",
+    "id, session_date, status, guest_count, start_time, end_time, total_fee, remarks",
+    "id, session_date, status, guest_count, start_time, end_time, total_fee, location",
+    "id, session_date, status, guest_count, start_time, end_time, total_fee",
     "id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, location, remarks",
     "id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, remarks",
     "id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, location",
@@ -123,7 +139,8 @@ Deno.serve(async (req) => {
       !message.includes("location") &&
       !message.includes("remarks") &&
       !message.includes("splitwise_status") &&
-      !message.includes("payer_player_id")
+      !message.includes("payer_player_id") &&
+      !message.includes("guest_count")
     ) {
       break;
     }
@@ -135,7 +152,8 @@ Deno.serve(async (req) => {
     location: "location" in session ? session.location : null,
     remarks: "remarks" in session ? session.remarks : null,
     splitwise_status: "splitwise_status" in session ? session.splitwise_status : null,
-    payer_player_id: "payer_player_id" in session ? session.payer_player_id : null
+    payer_player_id: "payer_player_id" in session ? session.payer_player_id : null,
+    guest_count: "guest_count" in session && typeof session.guest_count === "number" ? session.guest_count : 0
   }));
 
   if (sessionsQuery.error) {

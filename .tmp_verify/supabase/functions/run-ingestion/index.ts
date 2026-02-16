@@ -1,17 +1,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { isAutomationSecretValid } from "../_shared/automation-auth.ts";
-import { resolveGmailOauthConfig } from "../_shared/gmail-config.ts";
 import {
   buildGmailQueryFromKeywords,
   ingestionDefaults,
   normalizeSubjectKeywords
 } from "../_shared/ingestion-utils.ts";
-import { finalizeRunHistory, resolveRunSource, startRunHistory } from "../_shared/run-history.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, apikey, x-club-token, x-automation-secret, x-run-source, content-type"
+  "Access-Control-Allow-Headers": "authorization, apikey, x-club-token, x-automation-secret, content-type"
 };
 
 type AutomationSettings = {
@@ -31,13 +28,6 @@ type IngestOutcome = {
   deduped: boolean;
   parseFailed: boolean;
 };
-
-function json(status: number, payload: Record<string, unknown>) {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" }
-  });
-}
 
 async function getSupabaseClient() {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -67,27 +57,19 @@ async function getAutomationSettings(supabase: ReturnType<typeof createClient>):
   };
 }
 
-async function getGmailAccessToken(supabase: ReturnType<typeof createClient>) {
-  const { data } = await supabase
-    .from("gmail_oauth_config")
-    .select("client_id,client_secret,refresh_token")
-    .eq("id", 1)
-    .maybeSingle();
+async function getGmailAccessToken() {
+  const clientId = Deno.env.get("GMAIL_CLIENT_ID");
+  const clientSecret = Deno.env.get("GMAIL_CLIENT_SECRET");
+  const refreshToken = Deno.env.get("GMAIL_REFRESH_TOKEN");
 
-  const resolved = resolveGmailOauthConfig(data, {
-    GMAIL_CLIENT_ID: Deno.env.get("GMAIL_CLIENT_ID"),
-    GMAIL_CLIENT_SECRET: Deno.env.get("GMAIL_CLIENT_SECRET"),
-    GMAIL_REFRESH_TOKEN: Deno.env.get("GMAIL_REFRESH_TOKEN")
-  });
-
-  if (!resolved) {
+  if (!clientId || !clientSecret || !refreshToken) {
     throw new Error("missing_gmail_oauth_config");
   }
 
   const body = new URLSearchParams({
-    client_id: resolved.clientId,
-    client_secret: resolved.clientSecret,
-    refresh_token: resolved.refreshToken,
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: refreshToken,
     grant_type: "refresh_token"
   });
 
@@ -293,42 +275,31 @@ Deno.serve(async (req) => {
 
   const supabase = await getSupabaseClient();
   if (!supabase) {
-    return json(500, { ok: false, error: "missing_supabase_service_role" });
-  }
-
-  const requestBody = (await req.json().catch(() => null)) as { query?: string } | null;
-  const runSource = resolveRunSource(req.headers.get("x-run-source"));
-  const run = await startRunHistory(supabase, {
-    jobType: "INGESTION",
-    runSource,
-    requestPayload: requestBody ?? {}
-  });
-  const finish = async (
-    status: "SUCCESS" | "FAILED" | "SKIPPED",
-    summary: Record<string, unknown>,
-    errorMessage?: string
-  ) => {
-    await finalizeRunHistory(supabase, run, {
-      status,
-      summary,
-      errorMessage: errorMessage ?? null
+    return new Response(JSON.stringify({ ok: false, error: "missing_supabase_service_role" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
-  };
+  }
 
   const settings = await getAutomationSettings(supabase);
   if (!settings.enabled) {
-    const summary = { total: 0, ingested: 0, deduped: 0, parse_failed: 0, fetch_failed: 0, skipped: true };
-    await finish("SKIPPED", summary);
-    return json(200, { ok: true, ...summary });
+    return new Response(
+      JSON.stringify({ ok: true, total: 0, ingested: 0, deduped: 0, parse_failed: 0, fetch_failed: 0, skipped: true }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      }
+    );
   }
 
+  const requestBody = (await req.json().catch(() => null)) as { query?: string } | null;
   const query =
     typeof requestBody?.query === "string" && requestBody.query.trim()
       ? requestBody.query.trim()
       : buildGmailQueryFromKeywords(settings.subjectKeywords);
 
   try {
-    const { access_token } = await getGmailAccessToken(supabase);
+    const { access_token } = await getGmailAccessToken();
     const list = await listGmailMessages(access_token, query);
     const messageIds = list.messages?.map((message) => message.id) ?? [];
 
@@ -371,21 +342,25 @@ Deno.serve(async (req) => {
       }
     }
 
-    const summary = {
-      total: messageIds.length,
-      ingested,
-      deduped,
-      parse_failed: parseFailed,
-      fetch_failed: fetchFailed
-    };
-    await finish("SUCCESS", summary);
-    return json(200, {
-      ok: true,
-      ...summary
-    });
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        total: messageIds.length,
+        ingested,
+        deduped,
+        parse_failed: parseFailed,
+        fetch_failed: fetchFailed
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      }
+    );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "ingestion_failed";
-    await finish("FAILED", { query }, errorMessage);
-    return json(500, { ok: false, error: errorMessage });
+    return new Response(JSON.stringify({ ok: false, error: errorMessage }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
   }
 });

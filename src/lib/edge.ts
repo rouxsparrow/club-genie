@@ -63,6 +63,7 @@ type SessionSummary = {
   status: string;
   splitwise_status?: string | null;
   payer_player_id?: string | null;
+  guest_count?: number | null;
   start_time: string | null;
   end_time: string | null;
   total_fee: number | null;
@@ -186,6 +187,40 @@ export function joinSession(token: string, payload: JoinWithdrawPayload) {
 
 export function withdrawSession(token: string, payload: JoinWithdrawPayload) {
   return postJoinWithdraw(token, "withdraw-session", payload);
+}
+
+type SetSessionGuestsPayload = {
+  sessionId: string;
+  guestCount: number;
+};
+
+type SetSessionGuestsResponse = {
+  ok: boolean;
+  error?: string;
+  detail?: string;
+  sessionId?: string;
+  guestCount?: number;
+};
+
+export async function setSessionGuests(
+  token: string,
+  payload: SetSessionGuestsPayload
+): Promise<SetSessionGuestsResponse> {
+  const url = `${getEdgeFunctionBaseUrl()}/set-session-guests`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      ...buildEdgeHeaders(token),
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = (await response.json().catch(() => null)) as SetSessionGuestsResponse | null;
+  if (!response.ok) {
+    return data ?? { ok: false, error: "request_failed" };
+  }
+  return data ?? { ok: false, error: "request_failed" };
 }
 
 type ReceiptError = {

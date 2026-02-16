@@ -35,6 +35,7 @@ export async function POST() {
       Authorization: `Bearer ${anonKey}`,
       apikey: anonKey,
       "x-automation-secret": automationSecret,
+      "x-run-source": "ADMIN_MANUAL",
       "content-type": "application/json"
     },
     body: JSON.stringify({})
@@ -47,4 +48,3 @@ export async function POST() {
 
   return NextResponse.json(data ?? { ok: true });
 }
-

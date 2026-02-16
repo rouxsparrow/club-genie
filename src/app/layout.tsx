@@ -29,9 +29,9 @@ type RootLayoutProps = {
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="en" className={`${spaceGrotesk.variable} ${spaceMono.variable}`} suppressHydrationWarning>
-      <body className="page-shell font-sans" suppressHydrationWarning>
+      <body className="page-shell relative font-sans" suppressHydrationWarning>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-        <ThemeToggle className="fixed right-4 top-4 z-40 sm:right-6 sm:top-6" />
+        <ThemeToggle className="absolute right-4 top-4 z-40 sm:right-6 sm:top-6" />
         {children}
       </body>
     </html>

@@ -24,6 +24,7 @@ jobs:
             -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
             -H "apikey: ${SUPABASE_ANON_KEY}" \
             -H "x-automation-secret: ${AUTOMATION_SECRET}" \
+            -H "x-run-source: GITHUB_CRON" \
             -H "content-type: application/json" \
             --data '{}')
 

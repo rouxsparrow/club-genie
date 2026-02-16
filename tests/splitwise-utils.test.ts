@@ -79,6 +79,47 @@ describe("splitwise utils", () => {
     expect(payload["users__2__owed_share"]).toBe("0.33");
   });
 
+  it("assigns guest shares to payer when guests are present", () => {
+    const built = buildSplitwiseBySharesPayload({
+      groupId: 11,
+      currencyCode: "SGD",
+      description: "Guests test",
+      costCents: 10000,
+      dateIso: "2026-02-01T14:00:00.000Z",
+      payerUserId: 10,
+      participantUserIds: [10, 20, 30, 40, 50, 60, 70],
+      guestCount: 3
+    });
+
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const payload = built.payload as Record<string, unknown>;
+    // 100.00 / 10 shares => 10.00 each, 3 guest shares added to payer.
+    expect(payload["users__0__owed_share"]).toBe("40.00");
+    expect(payload["users__1__owed_share"]).toBe("10.00");
+    expect(payload["users__2__owed_share"]).toBe("10.00");
+  });
+
+  it("handles payer not in participants with guests", () => {
+    const built = buildSplitwiseBySharesPayload({
+      groupId: 11,
+      currencyCode: "SGD",
+      description: "Guests test 2",
+      costCents: 10000,
+      dateIso: "2026-02-01T14:00:00.000Z",
+      payerUserId: 999,
+      participantUserIds: [10, 20, 30, 40, 50, 60, 70],
+      guestCount: 3
+    });
+
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const payload = built.payload as Record<string, unknown>;
+    // Payer not in participants => owes only guest shares.
+    expect(payload["users__0__owed_share"]).toBe("30.00");
+    expect(payload["users__1__owed_share"]).toBe("10.00");
+  });
+
   it("renders description template placeholders safely", () => {
     expect(
       renderDescriptionTemplate(

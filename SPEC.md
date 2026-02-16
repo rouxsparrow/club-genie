@@ -29,6 +29,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Same-day receipt aggregation requires a single consistent location; location conflicts are treated as parse failures.
 - On parse failure, create a DRAFT session and notify admin via in-app admin error queue.
 - Public users can join or withdraw from OPEN sessions, including multi-player registration.
+- Public users can set per-session anonymous guest count (0-20) in the Join/Withdraw dialog.
 - Admin can edit session details and fix DRAFT sessions.
 - Admin can set a per-session Splitwise payer override from session edit; new sessions default to the current default payer.
 - Admin can manage players (add, rename, deactivate/reactivate).
@@ -37,11 +38,14 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Admin can rotate the club access token and share a new invite link.
 - Admin can view the current club access token/link from DB (not browser localStorage).
 - Admin can preview raw Gmail receipt bodies (text/HTML) in the Automation area for parser debugging.
+- Admin can query ingestion and Splitwise automation run history (cron/manual source, status, summary, errors) from Admin tabs.
 - Admin can edit Gmail OAuth config (`client_id`, `client_secret`, `refresh_token`) stored in Supabase.
 - Admin can manage admin accounts (create/update/deactivate/reset password) and change own password.
 - Session closing cron creates Splitwise expenses and marks sessions CLOSED, idempotently.
 - Sessions display participants as avatar circles by default; tapping toggles participant names.
 - Join/Withdraw player picker shows avatar + name rows.
+- Session cards show participant count as "`x players joined`", and include guest indicator when guests are added.
+- Splitwise share math includes guest shares and assigns those guest shares to the resolved session payer.
 
 ## Access Model
 - A single club-level access token is embedded in the shared link once and stored in localStorage.

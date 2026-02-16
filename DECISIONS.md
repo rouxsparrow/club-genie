@@ -67,6 +67,18 @@
 - Decision: Add `players.avatar_path` and store avatar files in a public Supabase bucket `player-avatars` (2MB, jpeg/png/webp). Upload/replace/remove operations are exposed only through admin server routes; public/session payloads return computed `avatar_url` and fall back safely when the avatar migration is not yet applied.
 - Rationale: Keeps avatar management simple for free-tier infra, avoids exposing service credentials in the browser, and supports graceful rollout in partially-migrated environments.
 
+## ADR-0012: Model Guests as Session-level Count and Allocate Guest Shares to Session Payer
+- Date: 2026-02-16
+- Status: Accepted
+- Decision: Add `sessions.guest_count` (0..20, default 0), editable by any club-token holder from Join/Withdraw UI and persisted only on submit. Keep guests anonymous (count only). In Splitwise sync, total shares become `participants + guests`; participant shares remain one-per-player while all guest shares are assigned to the resolved session payer (session override payer first, else default payer).
+- Rationale: Supports real-world "bring guests" behavior without creating fake player identities, keeps UI simple for public users, and preserves deterministic split math for automation.
+
+## ADR-0013: Persist Automation Run History in DB and Surface Query UI in Admin
+- Date: 2026-02-16
+- Status: Accepted
+- Decision: Add `automation_run_history` to persist ingestion/splitwise run outcomes (`job_type`, `run_source`, `status`, `summary`, `error_message`, timing fields). `run-ingestion` and `run-splitwise-sync` write run records using service-role access. Admin tabs expose filtered run-history queries for both automation tracks.
+- Rationale: Provides auditability for scheduled jobs on free-tier infrastructure, helps diagnose cron/manual differences quickly, and avoids relying on external CI logs as the only source of truth.
+
 ## Pending Decisions
 - Player identity model (predefined list vs free-text vs hybrid).
 - Session edit rules (post-close edits, participant locking, Splitwise regeneration).

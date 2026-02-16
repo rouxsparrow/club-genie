@@ -125,13 +125,32 @@ export function buildSplitwiseBySharesPayload(input: {
   dateIso: string;
   payerUserId: number;
   participantUserIds: number[];
+  guestCount?: number;
 }) {
-  const owedMap = computeEqualOwedSharesCents(input.costCents, input.participantUserIds);
-  if (!owedMap) {
+  const uniqueParticipants = [...new Set(input.participantUserIds)].sort((a, b) => a - b);
+  if (uniqueParticipants.length === 0) {
     return { ok: false as const, error: "missing_participants" };
   }
 
-  const payerOwed = owedMap.get(input.payerUserId) ?? 0;
+  const guestCount = Number.isInteger(input.guestCount) ? (input.guestCount as number) : 0;
+  if (guestCount < 0) {
+    return { ok: false as const, error: "invalid_guest_count" };
+  }
+
+  const totalShares = uniqueParticipants.length + guestCount;
+  if (totalShares <= 0 || !Number.isInteger(input.costCents) || input.costCents <= 0) {
+    return { ok: false as const, error: "missing_participants" };
+  }
+
+  const base = Math.floor(input.costCents / totalShares);
+  const remainder = input.costCents - base * totalShares;
+  const shareValues = Array.from({ length: totalShares }, (_, idx) => base + (idx < remainder ? 1 : 0));
+  const participantOwedMap = new Map<number, number>();
+  uniqueParticipants.forEach((userId, idx) => {
+    participantOwedMap.set(userId, shareValues[idx] ?? 0);
+  });
+  const guestSharesOwed = shareValues.slice(uniqueParticipants.length).reduce((sum, value) => sum + value, 0);
+  const payerOwed = (participantOwedMap.get(input.payerUserId) ?? 0) + guestSharesOwed;
 
   const shares: SplitwiseShareRow[] = [];
   // Payer row first.
@@ -142,13 +161,12 @@ export function buildSplitwiseBySharesPayload(input: {
   });
 
   // Add non-payer participants.
-  const uniqueParticipants = [...owedMap.keys()].sort((a, b) => a - b);
   for (const userId of uniqueParticipants) {
     if (userId === input.payerUserId) continue;
     shares.push({
       userId,
       paidShareCents: 0,
-      owedShareCents: owedMap.get(userId) ?? 0
+      owedShareCents: participantOwedMap.get(userId) ?? 0
     });
   }
 

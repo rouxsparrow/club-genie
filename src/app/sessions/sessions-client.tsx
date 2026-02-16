@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpDown, CalendarDays, Clock3, DollarSign, LayoutGrid, MapPin, Rows3, Users2 } from "lucide-react";
+import { ArrowUpDown, CalendarDays, CircleUserRound, Clock3, DollarSign, LayoutGrid, MapPin, Rows3, Users2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminNavbar from "../../components/admin-navbar";
@@ -10,9 +10,11 @@ import {
   joinSession,
   listPlayers,
   listSessions,
+  setSessionGuests,
   validateClubToken,
   withdrawSession
 } from "../../lib/edge";
+import { MAX_GUEST_COUNT, normalizeGuestCount } from "../../lib/session-guests";
 import { combineDateAndTimeToIso, isQuarterHourTime, toLocalTime } from "../../lib/session-time";
 
 type GateState = "checking" | "denied" | "allowed";
@@ -28,6 +30,7 @@ type SessionSummary = {
   status: string;
   splitwise_status?: string | null;
   payer_player_id?: string | null;
+  guest_count?: number | null;
   start_time: string | null;
   end_time: string | null;
   total_fee: number | null;
@@ -291,6 +294,45 @@ function getParticipantNames(participants: ParticipantDetail[]) {
     .filter((name): name is string => Boolean(name));
 }
 
+function getPlayerSelectionStatus(playerId: string, selectedIds: string[], joinedIds: string[]) {
+  const selected = selectedIds.includes(playerId);
+  const joined = joinedIds.includes(playerId);
+  if (selected && joined) return "Joined";
+  if (selected && !joined) return "Will join";
+  if (!selected && joined) return "Will withdraw";
+  return "Not joined";
+}
+
+function ParticipantAvatarGrid({
+  participants,
+  guestCount
+}: {
+  participants: ParticipantDetail[];
+  guestCount: number;
+}) {
+  return (
+    <span className="grid grid-cols-6 gap-1.5">
+      {participants.map((entry, avatarIndex) => {
+        if (!entry.player) return null;
+        return (
+          <PlayerAvatarCircle
+            key={`${entry.player.id}:${avatarIndex}`}
+            name={entry.player.name}
+            avatarUrl={entry.player.avatar_url ?? null}
+            sizeClass="h-8 w-8 text-[11px]"
+          />
+        );
+      })}
+      {guestCount > 0 ? (
+        <span className="inline-flex h-8 w-8 shrink-0 flex-col items-center justify-center rounded-full border border-slate-200/80 bg-slate-100 text-[9px] font-semibold text-slate-600 dark:border-ink-700/60 dark:bg-ink-700 dark:text-slate-200">
+          <CircleUserRound size={12} />
+          <span className="leading-none">x{guestCount}</span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function buildEmptyForm(): SessionFormState {
   return {
     open: false,
@@ -327,6 +369,9 @@ export default function SessionsClient() {
     isSubmitting: false
   });
   const [joinDialogError, setJoinDialogError] = useState<string | null>(null);
+  const [guestCount, setGuestCount] = useState(0);
+  const [initialGuestCount, setInitialGuestCount] = useState(0);
+  const [showGuestControl, setShowGuestControl] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [formState, setFormState] = useState<SessionFormState>(buildEmptyForm());
@@ -403,7 +448,7 @@ export default function SessionsClient() {
   const refreshSessions = async (token: string) => {
     const sessionsResponse = await listSessions(token);
     if (sessionsResponse.ok) {
-      setSessions(sessionsResponse.sessions ?? []);
+      setSessions((sessionsResponse.sessions ?? []).map((session) => ({ ...session, guest_count: normalizeGuestCount(session.guest_count) })));
       setCourts(sessionsResponse.courts ?? []);
       setParticipants(sessionsResponse.participants ?? []);
       return true;
@@ -455,7 +500,7 @@ export default function SessionsClient() {
             : Promise.resolve(null)
         ]);
         if (sessionsResponse?.ok) {
-          setSessions(sessionsResponse.sessions ?? []);
+          setSessions((sessionsResponse.sessions ?? []).map((session) => ({ ...session, guest_count: normalizeGuestCount(session.guest_count) })));
           setCourts(sessionsResponse.courts ?? []);
           setParticipants(sessionsResponse.participants ?? []);
         }
@@ -496,22 +541,14 @@ export default function SessionsClient() {
     if (!joinState.open) return;
     const body = document.body;
     const previousOverflow = body.style.overflow;
-    const previousPosition = body.style.position;
-    const previousTop = body.style.top;
-    const previousWidth = body.style.width;
-    const scrollY = window.scrollY;
+    const previousOverscrollBehavior = body.style.overscrollBehavior;
 
     body.style.overflow = "hidden";
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.width = "100%";
+    body.style.overscrollBehavior = "contain";
 
     return () => {
       body.style.overflow = previousOverflow;
-      body.style.position = previousPosition;
-      body.style.top = previousTop;
-      body.style.width = previousWidth;
-      window.scrollTo(0, scrollY);
+      body.style.overscrollBehavior = previousOverscrollBehavior;
     };
   }, [joinState.open]);
 
@@ -530,6 +567,11 @@ export default function SessionsClient() {
     const joinedPlayerIds = (participantsBySession[sessionId] ?? [])
       .map((entry) => entry.player?.id)
       .filter((id): id is string => Boolean(id));
+    const session = sessions.find((entry) => entry.id === sessionId);
+    const nextGuestCount = normalizeGuestCount(session?.guest_count);
+    setGuestCount(nextGuestCount);
+    setInitialGuestCount(nextGuestCount);
+    setShowGuestControl(nextGuestCount > 0);
     setJoinState({
       open: true,
       sessionId,
@@ -564,6 +606,9 @@ export default function SessionsClient() {
 
   const closeJoinDialog = () => {
     setJoinDialogError(null);
+    setGuestCount(0);
+    setInitialGuestCount(0);
+    setShowGuestControl(false);
     setJoinState({ open: false, sessionId: null, selectedPlayerIds: [], joinedPlayerIds: [], isSubmitting: false });
   };
 
@@ -577,16 +622,26 @@ export default function SessionsClient() {
     });
   };
 
+  const incrementGuests = () => {
+    setGuestCount((prev) => normalizeGuestCount(prev + 1));
+    setShowGuestControl(true);
+  };
+
+  const decrementGuests = () => {
+    setGuestCount((prev) => normalizeGuestCount(prev - 1));
+  };
+
   const handleSubmitParticipants = async () => {
     const token = localStorage.getItem(getClubTokenStorageKey());
     if (!token || !joinState.sessionId) return;
     setJoinDialogError(null);
     const toJoin = joinState.selectedPlayerIds.filter((id) => !joinState.joinedPlayerIds.includes(id));
     const toWithdraw = joinState.joinedPlayerIds.filter((id) => !joinState.selectedPlayerIds.includes(id));
+    const guestChanged = guestCount !== initialGuestCount;
 
-    if (toJoin.length === 0 && toWithdraw.length === 0) {
+    if (toJoin.length === 0 && toWithdraw.length === 0 && !guestChanged) {
       closeJoinDialog();
-      setActionMessage("No participant changes.");
+      setActionMessage("No participant or guest changes.");
       return;
     }
 
@@ -616,6 +671,23 @@ export default function SessionsClient() {
       }
     }
 
+    if (guestChanged) {
+      const guestResult = await setSessionGuests(token, {
+        sessionId: joinState.sessionId,
+        guestCount
+      });
+      if (!guestResult.ok) {
+        setJoinState((prev) => ({ ...prev, isSubmitting: false }));
+        setJoinDialogError(guestResult.detail ?? guestResult.error ?? "Guest update failed.");
+        return;
+      }
+      setSessions((prev) =>
+        prev.map((session) =>
+          session.id === joinState.sessionId ? { ...session, guest_count: normalizeGuestCount(guestResult.guestCount) } : session
+        )
+      );
+    }
+
     const selectedSet = new Set(joinState.selectedPlayerIds);
     const selectedParticipantRows = players
       .filter((player) => selectedSet.has(player.id))
@@ -631,6 +703,10 @@ export default function SessionsClient() {
     const refreshed = await refreshSessions(token);
     setJoinState((prev) => ({ ...prev, isSubmitting: false }));
     closeJoinDialog();
+    if (toJoin.length === 0 && toWithdraw.length === 0 && guestChanged) {
+      setActionMessage(refreshed ? "Guests updated." : "Guests updated. Refresh failed.");
+      return;
+    }
     setActionMessage(refreshed ? "Participants updated." : "Participants updated. Refresh failed.");
   };
 
@@ -871,7 +947,8 @@ export default function SessionsClient() {
               const courtItems = courtsBySession[session.id] ?? [];
               const participantItems = participantsBySession[session.id] ?? [];
               const participantNames = getParticipantNames(participantItems);
-              const hasParticipants = participantNames.length > 0;
+              const guestCountForSession = normalizeGuestCount(session.guest_count);
+              const hasParticipants = participantNames.length > 0 || guestCountForSession > 0;
               const participantsExpanded = Boolean(expandedParticipantNames[session.id]);
               const participantListId = `participant-names-${session.id}`;
               return (
@@ -948,24 +1025,16 @@ export default function SessionsClient() {
                           aria-controls={participantListId}
                         >
                           <Users2 size={14} className="text-emerald-400 dark:text-emerald-300" />
-                          <span className="flex flex-wrap items-center gap-1.5">
-                            {participantItems.map((entry, avatarIndex) => {
-                              if (!entry.player) return null;
-                              return (
-                                <PlayerAvatarCircle
-                                  key={`${entry.player.id}:${avatarIndex}`}
-                                  name={entry.player.name}
-                                  avatarUrl={entry.player.avatar_url ?? null}
-                                  sizeClass="h-8 w-8 text-[11px]"
-                                />
-                              );
-                            })}
-                          </span>
+                          <ParticipantAvatarGrid participants={participantItems} guestCount={guestCountForSession} />
                         </button>
+                        <p className="ml-6 mt-1 text-xs text-slate-500 dark:text-slate-300">
+                          {participantNames.length} players joined
+                          {guestCountForSession > 0 ? ` · Guests x${guestCountForSession}` : ""}
+                        </p>
                         {participantsExpanded ? (
                           <p id={participantListId} className="ml-6 mt-2 text-slate-500 dark:text-slate-300">
-                            {participantNames.join(", ")} ({participantNames.length}{" "}
-                            {participantNames.length === 1 ? "player" : "players"})
+                            {participantNames.length > 0 ? participantNames.join(", ") : "-"}
+                            {guestCountForSession > 0 ? ` · Guests x${guestCountForSession}` : ""}
                           </p>
                         ) : null}
                       </>
@@ -1056,7 +1125,8 @@ export default function SessionsClient() {
                 const courtItems = courtsBySession[session.id] ?? [];
                 const participantItems = participantsBySession[session.id] ?? [];
                 const participantNames = getParticipantNames(participantItems);
-                const hasParticipants = participantNames.length > 0;
+                const guestCountForSession = normalizeGuestCount(session.guest_count);
+                const hasParticipants = participantNames.length > 0 || guestCountForSession > 0;
                 const participantsExpanded = Boolean(expandedParticipantNames[session.id]);
                 const participantListId = `participant-names-desktop-${session.id}`;
                 const sessionTimeLines = formatSessionTimeRangeDesktopLines(session.start_time, session.end_time);
@@ -1104,24 +1174,16 @@ export default function SessionsClient() {
                             aria-expanded={participantsExpanded}
                             aria-controls={participantListId}
                           >
-                            <span className="flex flex-wrap items-center gap-1.5">
-                              {participantItems.map((entry, avatarIndex) => {
-                                if (!entry.player) return null;
-                                return (
-                                  <PlayerAvatarCircle
-                                    key={`${entry.player.id}:${avatarIndex}`}
-                                    name={entry.player.name}
-                                    avatarUrl={entry.player.avatar_url ?? null}
-                                    sizeClass="h-8 w-8 text-[11px]"
-                                  />
-                                );
-                              })}
-                            </span>
+                            <ParticipantAvatarGrid participants={participantItems} guestCount={guestCountForSession} />
                           </button>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
+                            {participantNames.length} players joined
+                            {guestCountForSession > 0 ? ` · Guests x${guestCountForSession}` : ""}
+                          </p>
                           {participantsExpanded ? (
                             <p id={participantListId} className="mt-2 text-slate-500 dark:text-slate-300">
-                              {participantNames.join(", ")} ({participantNames.length}{" "}
-                              {participantNames.length === 1 ? "player" : "players"})
+                              {participantNames.length > 0 ? participantNames.join(", ") : "-"}
+                              {guestCountForSession > 0 ? ` · Guests x${guestCountForSession}` : ""}
                             </p>
                           ) : null}
                         </>
@@ -1201,8 +1263,8 @@ export default function SessionsClient() {
       )}
 
       {joinState.open ? (
-        <section className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-6">
-          <div className="card w-full max-w-lg">
+        <section className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-3 py-3 sm:px-6">
+          <div className="card w-full max-w-2xl max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain p-4 sm:max-h-[calc(100dvh-3rem)] sm:p-6">
             <div className="flex items-start justify-between">
               <div>
                 <h2 className="text-2xl font-semibold">Select players</h2>
@@ -1210,53 +1272,84 @@ export default function SessionsClient() {
                   Choose one or more players to join or withdraw.
                 </p>
               </div>
-              <button type="button" onClick={closeJoinDialog} className="text-sm text-slate-500">
+              <button
+                type="button"
+                onClick={closeJoinDialog}
+                className="tap-feedback rounded-full border border-slate-200 px-3 py-1 text-sm font-semibold text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
+              >
                 Close
               </button>
             </div>
-            <div className="mt-4 grid gap-2">
-              {players.length === 0 ? <p>No players available.</p> : null}
-              {players.map((player) => (
-                <button
-                  type="button"
-                  key={player.id}
-                  onClick={() => togglePlayer(player.id)}
-                  className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm transition ${
-                    joinState.selectedPlayerIds.includes(player.id)
-                      ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/20 dark:text-emerald-200"
-                      : "border-slate-200/80 text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
-                  }`}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <PlayerAvatarCircle
-                      name={player.name}
-                      avatarUrl={player.avatar_url ?? null}
-                      sizeClass="h-7 w-7 text-[11px]"
-                    />
-                    <span>{player.name}</span>
-                  </span>
-                  <span className="text-xs font-semibold">
-                    {joinState.selectedPlayerIds.includes(player.id)
-                      ? joinState.joinedPlayerIds.includes(player.id)
-                        ? "Joined"
-                        : "Will join"
-                      : joinState.joinedPlayerIds.includes(player.id)
-                      ? "Will withdraw"
-                      : "Not joined"}
-                  </span>
-                </button>
-              ))}
+            <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
+              {players.length === 0 ? <p className="col-span-3">No players available.</p> : null}
+              {players.map((player) => {
+                const statusText = getPlayerSelectionStatus(player.id, joinState.selectedPlayerIds, joinState.joinedPlayerIds);
+                return (
+                  <button
+                    type="button"
+                    key={player.id}
+                    onClick={() => togglePlayer(player.id)}
+                    className={`tap-feedback min-h-[112px] rounded-2xl border px-2 py-2 text-sm transition sm:min-h-[132px] sm:px-3 sm:py-3 ${
+                      joinState.selectedPlayerIds.includes(player.id)
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/20 dark:text-emerald-200"
+                        : "border-slate-200/80 text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+                    }`}
+                  >
+                    <span className="flex h-full w-full flex-col items-center justify-center gap-2 text-center">
+                      <PlayerAvatarCircle
+                        name={player.name}
+                        avatarUrl={player.avatar_url ?? null}
+                        sizeClass="h-12 w-12 text-sm sm:h-14 sm:w-14 sm:text-base"
+                      />
+                      <span className="max-w-full text-sm font-semibold leading-tight sm:text-base">{player.name}</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide sm:text-xs">{statusText}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
             {joinDialogError ? <p className="mt-3 text-sm text-rose-400">{joinDialogError}</p> : null}
-            <div className="mt-4 flex flex-wrap gap-3">
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={handleSubmitParticipants}
+                disabled={joinState.isSubmitting}
+                className="tap-feedback tap-feedback-strong btn-ripple rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:-translate-y-0.5 disabled:opacity-60"
+              >
+                {joinState.isSubmitting ? "Submitting..." : "Submit"}
+              </button>
+              <div className={`guest-morph-shell ${showGuestControl ? "expanded" : "collapsed"}`}>
                 <button
                   type="button"
-                  onClick={handleSubmitParticipants}
-                  disabled={joinState.isSubmitting}
-                  className="tap-feedback tap-feedback-strong btn-ripple rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:-translate-y-0.5"
+                  onClick={() => setShowGuestControl(true)}
+                  className="guest-morph-add tap-feedback rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+                  aria-hidden={showGuestControl}
+                  tabIndex={showGuestControl ? -1 : 0}
                 >
-                  {joinState.isSubmitting ? "Submitting..." : "Submit"}
+                  Add Guests
                 </button>
+                <div className="guest-morph-controls">
+                  <button
+                    type="button"
+                    onClick={incrementGuests}
+                    disabled={guestCount >= MAX_GUEST_COUNT}
+                    className="tap-feedback inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-ink-700/60 dark:text-slate-100"
+                  >
+                    +
+                  </button>
+                  <span className="min-w-[88px] text-center text-sm font-semibold text-slate-700 dark:text-slate-100">
+                    {guestCount} Guest{guestCount === 1 ? "" : "s"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={decrementGuests}
+                    disabled={guestCount <= 0}
+                    className="tap-feedback inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-ink-700/60 dark:text-slate-100"
+                  >
+                    -
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </section>

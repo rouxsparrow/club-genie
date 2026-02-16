@@ -87,6 +87,22 @@ type EmailPreviewMessage = {
   sessionStatus: string | null;
 };
 
+type RunHistoryStatusFilter = "ALL" | "RUNNING" | "SUCCESS" | "FAILED" | "SKIPPED";
+type RunHistorySourceFilter = "ALL" | "GITHUB_CRON" | "ADMIN_MANUAL" | "API" | "UNKNOWN";
+
+type RunHistoryEntry = {
+  id: string;
+  job_type: "INGESTION" | "SPLITWISE";
+  run_source: RunHistorySourceFilter;
+  status: Exclude<RunHistoryStatusFilter, "ALL">;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  summary: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at: string | null;
+};
+
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("players");
   const [mounted, setMounted] = useState(false);
@@ -112,6 +128,10 @@ export default function AdminPage() {
     parse_failed: number;
     fetch_failed: number;
   } | null>(null);
+  const [automationHistoryStatusFilter, setAutomationHistoryStatusFilter] = useState<RunHistoryStatusFilter>("ALL");
+  const [automationHistorySourceFilter, setAutomationHistorySourceFilter] = useState<RunHistorySourceFilter>("ALL");
+  const [automationRunHistory, setAutomationRunHistory] = useState<RunHistoryEntry[]>([]);
+  const [loadingAutomationRunHistory, setLoadingAutomationRunHistory] = useState(false);
   const [receiptErrors, setReceiptErrors] = useState<ReceiptError[]>([]);
   const [loadingReceiptErrors, setLoadingReceiptErrors] = useState(true);
   const [currentToken, setCurrentToken] = useState<string | null>(null);
@@ -156,6 +176,10 @@ export default function AdminPage() {
   const [splitwiseRunErrors, setSplitwiseRunErrors] = useState<
     Array<{ session_id: string; session_date?: string; code: string; message: string }>
   >([]);
+  const [splitwiseHistoryStatusFilter, setSplitwiseHistoryStatusFilter] = useState<RunHistoryStatusFilter>("ALL");
+  const [splitwiseHistorySourceFilter, setSplitwiseHistorySourceFilter] = useState<RunHistorySourceFilter>("ALL");
+  const [splitwiseRunHistory, setSplitwiseRunHistory] = useState<RunHistoryEntry[]>([]);
+  const [loadingSplitwiseRunHistory, setLoadingSplitwiseRunHistory] = useState(false);
   const [splitwiseGroupsResult, setSplitwiseGroupsResult] = useState<{ groups: unknown[]; raw: unknown } | null>(null);
   const [splitwiseGroupDetailIdInput, setSplitwiseGroupDetailIdInput] = useState("");
   const [splitwiseGroupDetailResult, setSplitwiseGroupDetailResult] = useState<{ group: unknown; raw: unknown } | null>(null);
@@ -186,6 +210,33 @@ export default function AdminPage() {
     if (emailStatusFilter === "ALL") return emailPreview.messages;
     return emailPreview.messages.filter((message) => message.status === emailStatusFilter);
   }, [emailPreview, emailStatusFilter]);
+
+  const formatDuration = (durationMs: number | null) => {
+    if (typeof durationMs !== "number" || durationMs < 0) return "-";
+    if (durationMs < 1000) return `${durationMs}ms`;
+    const seconds = durationMs / 1000;
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
+    return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+  };
+
+  const formatIngestionHistorySummary = (summary: Record<string, unknown> | null) => {
+    if (!summary) return "-";
+    const total = typeof summary.total === "number" ? summary.total : 0;
+    const ingested = typeof summary.ingested === "number" ? summary.ingested : 0;
+    const deduped = typeof summary.deduped === "number" ? summary.deduped : 0;
+    const parseFailed = typeof summary.parse_failed === "number" ? summary.parse_failed : 0;
+    const fetchFailed = typeof summary.fetch_failed === "number" ? summary.fetch_failed : 0;
+    return `total ${total} | ingested ${ingested} | deduped ${deduped} | parse ${parseFailed} | fetch ${fetchFailed}`;
+  };
+
+  const formatSplitwiseHistorySummary = (summary: Record<string, unknown> | null) => {
+    if (!summary) return "-";
+    const closed = typeof summary.closed_updated === "number" ? summary.closed_updated : 0;
+    const created = typeof summary.splitwise_created === "number" ? summary.splitwise_created : 0;
+    const skipped = typeof summary.splitwise_skipped === "number" ? summary.splitwise_skipped : 0;
+    const failed = typeof summary.splitwise_failed === "number" ? summary.splitwise_failed : 0;
+    return `closed ${closed} | created ${created} | skipped ${skipped} | failed ${failed}`;
+  };
 
   const refreshCurrentClubToken = async () => {
     const response = await fetch("/api/admin/club-token/current", { credentials: "include" });
@@ -386,6 +437,48 @@ export default function AdminPage() {
     setLoadingReceiptErrors(false);
   };
 
+  const loadAutomationRunHistory = async () => {
+    setLoadingAutomationRunHistory(true);
+    const qs = new URLSearchParams();
+    if (automationHistoryStatusFilter !== "ALL") {
+      qs.set("status", automationHistoryStatusFilter);
+    }
+    if (automationHistorySourceFilter !== "ALL") {
+      qs.set("source", automationHistorySourceFilter);
+    }
+    qs.set("limit", "30");
+    const response = await fetch(`/api/admin/automation/run-history?${qs.toString()}`, { credentials: "include" });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; runs?: RunHistoryEntry[]; error?: string } | null;
+    if (!data?.ok) {
+      setAutomationMessage(data?.error ?? "Failed to load run history.");
+      setLoadingAutomationRunHistory(false);
+      return;
+    }
+    setAutomationRunHistory(Array.isArray(data.runs) ? data.runs : []);
+    setLoadingAutomationRunHistory(false);
+  };
+
+  const loadSplitwiseRunHistory = async () => {
+    setLoadingSplitwiseRunHistory(true);
+    const qs = new URLSearchParams();
+    if (splitwiseHistoryStatusFilter !== "ALL") {
+      qs.set("status", splitwiseHistoryStatusFilter);
+    }
+    if (splitwiseHistorySourceFilter !== "ALL") {
+      qs.set("source", splitwiseHistorySourceFilter);
+    }
+    qs.set("limit", "30");
+    const response = await fetch(`/api/admin/splitwise/run-history?${qs.toString()}`, { credentials: "include" });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; runs?: RunHistoryEntry[]; error?: string } | null;
+    if (!data?.ok) {
+      setSplitwiseMessage(data?.error ?? "Failed to load run history.");
+      setLoadingSplitwiseRunHistory(false);
+      return;
+    }
+    setSplitwiseRunHistory(Array.isArray(data.runs) ? data.runs : []);
+    setLoadingSplitwiseRunHistory(false);
+  };
+
   const saveAutomationSettings = async () => {
     const keywords = keywordsInput
       .split(",")
@@ -443,7 +536,7 @@ export default function AdminPage() {
     });
     setAutomationMessage("Ingestion run completed.");
     setRunningIngestion(false);
-    await Promise.all([refreshReceiptErrors(), refreshAutomationSettings()]);
+    await Promise.all([refreshReceiptErrors(), refreshAutomationSettings(), loadAutomationRunHistory()]);
   };
 
   const loadEmailPreview = async () => {
@@ -788,6 +881,7 @@ export default function AdminPage() {
     setSplitwiseRunErrors(Array.isArray(data.errors) ? data.errors : []);
     setSplitwiseMessage("Splitwise sync completed.");
     setRunningSplitwise(false);
+    await loadSplitwiseRunHistory();
   };
 
   const fetchSplitwiseGroups = async () => {
@@ -1374,6 +1468,81 @@ export default function AdminPage() {
           </div>
 
           <div className="card">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">Ingestion Run History</h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
+                  Query cron and manual ingestion run results.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <select
+                  value={automationHistorySourceFilter}
+                  onChange={(event) => setAutomationHistorySourceFilter(event.target.value as RunHistorySourceFilter)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                >
+                  <option value="ALL">All Sources</option>
+                  <option value="GITHUB_CRON">GitHub Cron</option>
+                  <option value="ADMIN_MANUAL">Admin Manual</option>
+                  <option value="API">API</option>
+                  <option value="UNKNOWN">Unknown</option>
+                </select>
+                <select
+                  value={automationHistoryStatusFilter}
+                  onChange={(event) => setAutomationHistoryStatusFilter(event.target.value as RunHistoryStatusFilter)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="RUNNING">RUNNING</option>
+                  <option value="SUCCESS">SUCCESS</option>
+                  <option value="FAILED">FAILED</option>
+                  <option value="SKIPPED">SKIPPED</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={loadAutomationRunHistory}
+                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+                >
+                  {loadingAutomationRunHistory ? "Loading..." : "Load History"}
+                </button>
+              </div>
+            </div>
+
+            {automationRunHistory.length === 0 ? (
+              <p className="mt-4 text-sm text-slate-500">{loadingAutomationRunHistory ? "" : "No runs found."}</p>
+            ) : (
+              <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-ink-700/60">
+                <table className="min-w-[900px] w-full text-left text-sm">
+                  <thead className="bg-slate-100/70 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-ink-900/40 dark:text-slate-300">
+                    <tr>
+                      <th className="px-4 py-3">Started</th>
+                      <th className="px-4 py-3">Source</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Duration</th>
+                      <th className="px-4 py-3">Summary</th>
+                      <th className="px-4 py-3">Error</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200/70 dark:divide-ink-700/60">
+                    {automationRunHistory.map((entry) => (
+                      <tr key={entry.id}>
+                        <td className="px-4 py-3">{entry.started_at ? new Date(entry.started_at).toLocaleString() : "-"}</td>
+                        <td className="px-4 py-3">{entry.run_source}</td>
+                        <td className="px-4 py-3">{entry.status}</td>
+                        <td className="px-4 py-3">{formatDuration(entry.duration_ms)}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-300">
+                          {formatIngestionHistorySummary(entry.summary)}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-rose-500">{entry.error_message ?? "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
             <h3 className="text-lg font-semibold">Parse Failures</h3>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
               Latest receipt parse failures that require admin review.
@@ -1614,6 +1783,81 @@ export default function AdminPage() {
                 </div>
               </div>
             ) : null}
+
+            <div className="mt-6 rounded-2xl border border-slate-200/80 p-4 text-sm dark:border-ink-700/60">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">Splitwise Run History</h3>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
+                    Query cron and manual Splitwise sync runs.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <select
+                    value={splitwiseHistorySourceFilter}
+                    onChange={(event) => setSplitwiseHistorySourceFilter(event.target.value as RunHistorySourceFilter)}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                  >
+                    <option value="ALL">All Sources</option>
+                    <option value="GITHUB_CRON">GitHub Cron</option>
+                    <option value="ADMIN_MANUAL">Admin Manual</option>
+                    <option value="API">API</option>
+                    <option value="UNKNOWN">Unknown</option>
+                  </select>
+                  <select
+                    value={splitwiseHistoryStatusFilter}
+                    onChange={(event) => setSplitwiseHistoryStatusFilter(event.target.value as RunHistoryStatusFilter)}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                  >
+                    <option value="ALL">All Statuses</option>
+                    <option value="RUNNING">RUNNING</option>
+                    <option value="SUCCESS">SUCCESS</option>
+                    <option value="FAILED">FAILED</option>
+                    <option value="SKIPPED">SKIPPED</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={loadSplitwiseRunHistory}
+                    className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+                  >
+                    {loadingSplitwiseRunHistory ? "Loading..." : "Load History"}
+                  </button>
+                </div>
+              </div>
+
+              {splitwiseRunHistory.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">{loadingSplitwiseRunHistory ? "" : "No runs found."}</p>
+              ) : (
+                <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-ink-700/60">
+                  <table className="min-w-[900px] w-full text-left text-sm">
+                    <thead className="bg-slate-100/70 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-ink-900/40 dark:text-slate-300">
+                      <tr>
+                        <th className="px-4 py-3">Started</th>
+                        <th className="px-4 py-3">Source</th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3">Duration</th>
+                        <th className="px-4 py-3">Summary</th>
+                        <th className="px-4 py-3">Error</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200/70 dark:divide-ink-700/60">
+                      {splitwiseRunHistory.map((entry) => (
+                        <tr key={entry.id}>
+                          <td className="px-4 py-3">{entry.started_at ? new Date(entry.started_at).toLocaleString() : "-"}</td>
+                          <td className="px-4 py-3">{entry.run_source}</td>
+                          <td className="px-4 py-3">{entry.status}</td>
+                          <td className="px-4 py-3">{formatDuration(entry.duration_ms)}</td>
+                          <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-300">
+                            {formatSplitwiseHistorySummary(entry.summary)}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-rose-500">{entry.error_message ?? "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
 
             <div className="mt-6 rounded-2xl border border-slate-200/80 p-4 text-sm dark:border-ink-700/60">
               <h3 className="text-lg font-semibold">Group Tools</h3>

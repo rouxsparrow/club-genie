@@ -92,6 +92,7 @@
 - [x] Add unit tests for automation auth, query builder, timezone conversion, and aggregation.
 - [x] Add backward-compatible club token admin API behavior for missing `token_value` migration, with warning metadata and hash-only rotate fallback.
 - [x] Add unit tests for club token compatibility helpers (missing-column detection, token normalization, warning messages).
+- [x] Replace hardcoded admin credentials with DB-backed account auth (`admin_users`), session-version cookie revocation checks, break-glass fallback, and Admin Accounts CRUD/reset/change-password UI (tests: `tests/admin-session.test.ts`, `tests/password-hash.test.ts`, `tests/admin-account-safety.test.ts`; manual browser check required for `/admin` Accounts tab and break-glass banner behavior).
 
 ## MVP (Current)
 - [x] Admin login with signed httpOnly cookie.

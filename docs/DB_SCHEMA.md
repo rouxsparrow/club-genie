@@ -4,6 +4,7 @@
 - club_settings: one row per token rotation (`token_hash` for validation + `token_value` for admin retrieval).
 - automation_settings: singleton ingestion configuration (keywords/timezone/enabled).
 - gmail_oauth_config: singleton Gmail OAuth config (`client_id`, `client_secret`, `refresh_token`).
+- admin_users: admin authentication accounts (`username`, `password_hash`, `active`, `session_version`).
 - sessions: one per calendar day (unique `session_date`).
 - courts: time slots per session.
 - players: predefined player roster.

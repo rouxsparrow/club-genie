@@ -11,7 +11,7 @@ export default async function AdminLoginPage({ searchParams }: AdminLoginPagePro
       <div className="card">
         <h1 className="text-3xl font-semibold">Admin Login</h1>
         <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
-          Use the shared admin credentials to manage the club.
+          Sign in with your admin account credentials.
         </p>
         {hasError ? <p className="mt-3 text-sm text-rose-500">Invalid username or password.</p> : null}
         <form method="post" action="/api/admin/login" className="mt-6 grid gap-4">

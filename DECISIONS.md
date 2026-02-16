@@ -55,9 +55,14 @@
 - Decision: `club-token/current` and `club-token/rotate` must gracefully handle missing `club_settings.token_value` (Postgres `42703`) by returning warnings and falling back to hash-only rotation when needed.
 - Rationale: Prevents admin-page breakage during staged deployments and allows token rotation continuity before migration completion.
 
+## ADR-0010: Replace Hardcoded Admin Credentials with DB-backed Accounts + Session Version Revocation
+- Date: 2026-02-16
+- Status: Accepted
+- Decision: Move admin auth from hardcoded credentials to `admin_users` (username/password hash), keep signed `admin_session` cookie, and embed account id + `session_version` in cookie payload so middleware can revoke sessions on password reset/deactivation. Keep a flag-gated break-glass env fallback for bootstrap/recovery only.
+- Rationale: Removes static credentials from code, supports multi-admin operations, and enables immediate access revocation without waiting for cookie expiry.
+
 ## Pending Decisions
 - Player identity model (predefined list vs free-text vs hybrid).
-- Admin access control (magic link vs password vs secret URL).
 - Session edit rules (post-close edits, participant locking, Splitwise regeneration).
 - Error visibility/retention (where shown, raw email retention policy).
 - Public write protection approach (auth vs session code vs edge-only).

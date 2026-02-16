@@ -7,7 +7,7 @@ See `SPEC.md` for requirements and `TASKS.md` for the execution plan.
 ## Manual Test Steps
 1. Admin login:
    - Visit `/admin/login`.
-   - Sign in with `admin` / `admin`.
+   - Sign in with a DB admin account (or temporary break-glass credentials if enabled).
 2. Rotate token and access `/sessions`:
    - In the Admin console, open the `Club Access` tab.
    - Click `Rotate Token`, then `Copy Invite Link`.

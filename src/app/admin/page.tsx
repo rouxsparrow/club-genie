@@ -2,10 +2,11 @@
 
 import { Lock, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import AdminAccountsPanel from "../../components/admin-accounts-panel";
 import AdminNavbar from "../../components/admin-navbar";
 import ThemeToggle from "../../components/theme-toggle";
 
-type TabKey = "players" | "club" | "automation" | "emails" | "gmail" | "splitwise";
+type TabKey = "accounts" | "players" | "club" | "automation" | "emails" | "gmail" | "splitwise";
 
 type Player = {
   id: string;
@@ -864,6 +865,17 @@ export default function AdminPage() {
       <nav className="mt-8 flex flex-wrap gap-3">
         <button
           type="button"
+          onClick={() => setActiveTab("accounts")}
+          className={`rounded-full px-4 py-2 text-sm font-semibold ${
+            activeTab === "accounts"
+              ? "bg-emerald-500 text-slate-900"
+              : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
+          }`}
+        >
+          Accounts
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab("players")}
           className={`rounded-full px-4 py-2 text-sm font-semibold ${
             activeTab === "players"
@@ -929,6 +941,8 @@ export default function AdminPage() {
           Splitwise
         </button>
       </nav>
+
+      {activeTab === "accounts" ? <AdminAccountsPanel /> : null}
 
       {activeTab === "players" ? (
         <section className="mt-8 grid gap-6">

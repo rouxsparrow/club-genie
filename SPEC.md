@@ -37,6 +37,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Admin can view the current club access token/link from DB (not browser localStorage).
 - Admin can preview raw Gmail receipt bodies (text/HTML) in the Automation area for parser debugging.
 - Admin can edit Gmail OAuth config (`client_id`, `client_secret`, `refresh_token`) stored in Supabase.
+- Admin can manage admin accounts (create/update/deactivate/reset password) and change own password.
 - Session closing cron creates Splitwise expenses and marks sessions CLOSED, idempotently.
 
 ## Access Model
@@ -46,7 +47,10 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Store hashed token for validation in `club_settings.token_hash`, and store the latest raw token in DB for admin invite-link retrieval.
 - Club token admin APIs handle legacy hash-only environments gracefully with actionable warnings until migration is applied.
 - Admin can rotate the token via Edge Function to invalidate prior links.
-- Admin login uses a signed httpOnly cookie (`admin_session`) with HMAC.
+- Admin login uses account-based username/password credentials from `admin_users`.
+- Admin session uses a signed httpOnly cookie (`admin_session`) with account id + session version snapshot.
+- Passwords are stored hashed (scrypt) in `admin_users.password_hash`.
+- Optional break-glass login is flag-gated by env (`ENABLE_ADMIN_BREAKGLASS=true`) for recovery only.
 - Scheduled ingestion uses a dedicated machine secret (`AUTOMATION_SECRET`), separate from the club invite token.
 
 ### Token Setup (Admin)

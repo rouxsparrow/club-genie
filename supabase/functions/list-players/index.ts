@@ -41,6 +41,16 @@ async function getSupabaseClient() {
   });
 }
 
+function avatarPathToPublicUrl(supabaseUrl: string | undefined, avatarPath: string | null | undefined) {
+  if (!supabaseUrl || !avatarPath) return null;
+  const base = supabaseUrl.replace(/\/$/, "");
+  const encodedPath = avatarPath
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `${base}/storage/v1/object/public/player-avatars/${encodedPath}`;
+}
+
 async function validateClubToken(supabase: ReturnType<typeof createClient>, token: string) {
   const { data, error } = await supabase
     .from("club_settings")
@@ -87,18 +97,36 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { data: players, error } = await supabase
-    .from("players")
-    .select("id, name, active")
-    .eq("active", true)
-    .order("name", { ascending: true });
+  const selectCandidates = [
+    "id, name, active, avatar_path",
+    "id, name, active"
+  ] as const;
 
-  if (error) {
+  let query = await supabase.from("players").select(selectCandidates[0]).eq("active", true).order("name", { ascending: true });
+  for (let i = 1; i < selectCandidates.length && query.error; i += 1) {
+    const message = query.error.message ?? "";
+    if (!message.includes("avatar_path")) break;
+    query = await supabase.from("players").select(selectCandidates[i]).eq("active", true).order("name", { ascending: true });
+  }
+
+  if (query.error) {
     return new Response(JSON.stringify({ ok: false }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const players = (query.data ?? []).map((player) => ({
+    ...player,
+    avatar_url:
+      "avatar_path" in player
+        ? avatarPathToPublicUrl(
+            supabaseUrl,
+            typeof player.avatar_path === "string" && player.avatar_path.trim() ? player.avatar_path : null
+          )
+        : null
+  }));
 
   return new Response(JSON.stringify({ ok: true, players: players ?? [] }), {
     status: 200,

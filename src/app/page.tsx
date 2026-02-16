@@ -4,7 +4,7 @@ export default function HomePage() {
       <div className="card">
         <h1 className="text-4xl font-semibold">Club Genie</h1>
         <p className="mt-3 text-slate-500 dark:text-slate-300">
-          Automate badminton club sessions with clean, fast scheduling.
+          Taichi Badminton Club Sessions Management.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <a

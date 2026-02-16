@@ -41,6 +41,16 @@ async function getSupabaseClient() {
   });
 }
 
+function avatarPathToPublicUrl(supabaseUrl: string | undefined, avatarPath: string | null | undefined) {
+  if (!supabaseUrl || !avatarPath) return null;
+  const base = supabaseUrl.replace(/\/$/, "");
+  const encodedPath = avatarPath
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `${base}/storage/v1/object/public/player-avatars/${encodedPath}`;
+}
+
 async function validateClubToken(supabase: ReturnType<typeof createClient>, token: string) {
   const { data, error } = await supabase
     .from("club_settings")
@@ -141,10 +151,40 @@ Deno.serve(async (req) => {
     .select("id, session_id, court_label, start_time, end_time")
     .in("session_id", sessionIds.length > 0 ? sessionIds : ["00000000-0000-0000-0000-000000000000"]);
 
-  const { data: participants } = await supabase
+  const participantSessionIds = sessionIds.length > 0 ? sessionIds : ["00000000-0000-0000-0000-000000000000"];
+  const participantSelectCandidates = [
+    "session_id, player:players(id, name, avatar_path)",
+    "session_id, player:players(id, name)"
+  ] as const;
+  let participantsQuery = await supabase
     .from("session_participants")
-    .select("session_id, player:players(id, name)")
-    .in("session_id", sessionIds.length > 0 ? sessionIds : ["00000000-0000-0000-0000-000000000000"]);
+    .select(participantSelectCandidates[0])
+    .in("session_id", participantSessionIds);
+  for (let i = 1; i < participantSelectCandidates.length && participantsQuery.error; i += 1) {
+    const message = participantsQuery.error.message ?? "";
+    if (!message.includes("avatar_path")) break;
+    participantsQuery = await supabase
+      .from("session_participants")
+      .select(participantSelectCandidates[i])
+      .in("session_id", participantSessionIds);
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const participants = (participantsQuery.data ?? []).map((entry) => {
+    const player = entry.player as { id?: string; name?: string; avatar_path?: string | null } | null;
+    if (!player || typeof player.id !== "string" || typeof player.name !== "string") {
+      return { session_id: entry.session_id, player: null };
+    }
+    const avatarPath = typeof player.avatar_path === "string" && player.avatar_path.trim() ? player.avatar_path : null;
+    return {
+      session_id: entry.session_id,
+      player: {
+        id: player.id,
+        name: player.name,
+        avatar_url: avatarPathToPublicUrl(supabaseUrl, avatarPath)
+      }
+    };
+  });
 
   return new Response(
     JSON.stringify({

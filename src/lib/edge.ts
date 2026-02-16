@@ -119,7 +119,7 @@ type SessionCourt = CourtDetail & {
 
 type ParticipantDetail = {
   session_id: string;
-  player: { id: string; name: string } | null;
+  player: { id: string; name: string; avatar_url?: string | null } | null;
 };
 
 type GetSessionResponse = {
@@ -218,6 +218,7 @@ type Player = {
   id: string;
   name: string;
   active: boolean;
+  avatar_url?: string | null;
 };
 
 type ListPlayersResponse = {

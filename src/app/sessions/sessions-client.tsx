@@ -4,6 +4,7 @@ import { ArrowUpDown, CalendarDays, Clock3, DollarSign, LayoutGrid, MapPin, Rows
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminNavbar from "../../components/admin-navbar";
+import PlayerAvatarCircle from "../../components/player-avatar-circle";
 import {
   getClubTokenStorageKey,
   joinSession,
@@ -44,13 +45,14 @@ type CourtDetail = {
 
 type ParticipantDetail = {
   session_id: string;
-  player: { id: string; name: string } | null;
+  player: { id: string; name: string; avatar_url?: string | null } | null;
 };
 
 type Player = {
   id: string;
   name: string;
   active: boolean;
+  avatar_url?: string | null;
 };
 
 type AdminPlayer = {
@@ -283,12 +285,10 @@ function formatSessionTimeRangeDesktopLines(start: string | null, end: string | 
   };
 }
 
-function formatParticipantsSummary(participants: ParticipantDetail[]) {
-  const names = participants
+function getParticipantNames(participants: ParticipantDetail[]) {
+  return participants
     .map((entry) => entry.player?.name)
     .filter((name): name is string => Boolean(name));
-  if (names.length === 0) return "Open";
-  return `${names.join(", ")} (${names.length} ${names.length === 1 ? "player" : "players"})`;
 }
 
 function buildEmptyForm(): SessionFormState {
@@ -335,6 +335,7 @@ export default function SessionsClient() {
   const [sortKey, setSortKey] = useState<SortKey>("session_date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [entranceReady, setEntranceReady] = useState(false);
+  const [expandedParticipantNames, setExpandedParticipantNames] = useState<Record<string, boolean>>({});
   const showDevDelete = isAdmin && process.env.NODE_ENV === "development";
 
   const courtsBySession = useMemo(() => {
@@ -393,6 +394,10 @@ export default function SessionsClient() {
     }
     setSortKey(key);
     setSortDirection("asc");
+  };
+
+  const toggleParticipantsExpanded = (sessionId: string) => {
+    setExpandedParticipantNames((prev) => ({ ...prev, [sessionId]: !prev[sessionId] }));
   };
 
   const refreshSessions = async (token: string) => {
@@ -616,7 +621,7 @@ export default function SessionsClient() {
       .filter((player) => selectedSet.has(player.id))
       .map((player) => ({
         session_id: joinState.sessionId as string,
-        player: { id: player.id, name: player.name }
+        player: { id: player.id, name: player.name, avatar_url: player.avatar_url ?? null }
       }));
     setParticipants((prev) => [
       ...prev.filter((entry) => entry.session_id !== joinState.sessionId),
@@ -865,7 +870,10 @@ export default function SessionsClient() {
             {displayedSessions.map((session, index) => {
               const courtItems = courtsBySession[session.id] ?? [];
               const participantItems = participantsBySession[session.id] ?? [];
-              const participantSummary = formatParticipantsSummary(participantItems);
+              const participantNames = getParticipantNames(participantItems);
+              const hasParticipants = participantNames.length > 0;
+              const participantsExpanded = Boolean(expandedParticipantNames[session.id]);
+              const participantListId = `participant-names-${session.id}`;
               return (
                 <article
                   key={session.id}
@@ -929,9 +937,44 @@ export default function SessionsClient() {
                       </ul>
                     )}
                   </div>
-                  <div className="mt-3 flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-300">
-                    <Users2 size={14} className="text-emerald-400 dark:text-emerald-300" />
-                    <span>{participantSummary}</span>
+                  <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+                    {hasParticipants ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => toggleParticipantsExpanded(session.id)}
+                          className="tap-feedback flex w-full items-center gap-2.5 text-left"
+                          aria-expanded={participantsExpanded}
+                          aria-controls={participantListId}
+                        >
+                          <Users2 size={14} className="text-emerald-400 dark:text-emerald-300" />
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            {participantItems.map((entry, avatarIndex) => {
+                              if (!entry.player) return null;
+                              return (
+                                <PlayerAvatarCircle
+                                  key={`${entry.player.id}:${avatarIndex}`}
+                                  name={entry.player.name}
+                                  avatarUrl={entry.player.avatar_url ?? null}
+                                  sizeClass="h-8 w-8 text-[11px]"
+                                />
+                              );
+                            })}
+                          </span>
+                        </button>
+                        {participantsExpanded ? (
+                          <p id={participantListId} className="ml-6 mt-2 text-slate-500 dark:text-slate-300">
+                            {participantNames.join(", ")} ({participantNames.length}{" "}
+                            {participantNames.length === 1 ? "player" : "players"})
+                          </p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-2.5">
+                        <Users2 size={14} className="text-emerald-400 dark:text-emerald-300" />
+                        <span>Open</span>
+                      </div>
+                    )}
                   </div>
                   <div className="mt-4 flex items-center justify-between gap-3">
                     <span className="inline-flex items-center text-sm font-normal text-slate-400 dark:text-slate-400">
@@ -1012,7 +1055,10 @@ export default function SessionsClient() {
               {displayedSessions.map((session, index) => {
                 const courtItems = courtsBySession[session.id] ?? [];
                 const participantItems = participantsBySession[session.id] ?? [];
-                const participantSummary = formatParticipantsSummary(participantItems);
+                const participantNames = getParticipantNames(participantItems);
+                const hasParticipants = participantNames.length > 0;
+                const participantsExpanded = Boolean(expandedParticipantNames[session.id]);
+                const participantListId = `participant-names-desktop-${session.id}`;
                 const sessionTimeLines = formatSessionTimeRangeDesktopLines(session.start_time, session.end_time);
                 return (
                   <div
@@ -1049,7 +1095,39 @@ export default function SessionsClient() {
                       )}
                     </div>
                     <div className="text-slate-600 dark:text-slate-300">
-                      <span>{participantSummary}</span>
+                      {hasParticipants ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => toggleParticipantsExpanded(session.id)}
+                            className="tap-feedback flex w-full items-center gap-2 text-left"
+                            aria-expanded={participantsExpanded}
+                            aria-controls={participantListId}
+                          >
+                            <span className="flex flex-wrap items-center gap-1.5">
+                              {participantItems.map((entry, avatarIndex) => {
+                                if (!entry.player) return null;
+                                return (
+                                  <PlayerAvatarCircle
+                                    key={`${entry.player.id}:${avatarIndex}`}
+                                    name={entry.player.name}
+                                    avatarUrl={entry.player.avatar_url ?? null}
+                                    sizeClass="h-8 w-8 text-[11px]"
+                                  />
+                                );
+                              })}
+                            </span>
+                          </button>
+                          {participantsExpanded ? (
+                            <p id={participantListId} className="mt-2 text-slate-500 dark:text-slate-300">
+                              {participantNames.join(", ")} ({participantNames.length}{" "}
+                              {participantNames.length === 1 ? "player" : "players"})
+                            </p>
+                          ) : null}
+                        </>
+                      ) : (
+                        <span>Open</span>
+                      )}
                       <div className="mt-2">
                         <button
                           type="button"
@@ -1149,7 +1227,14 @@ export default function SessionsClient() {
                       : "border-slate-200/80 text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
                   }`}
                 >
-                  <span>{player.name}</span>
+                  <span className="inline-flex items-center gap-2">
+                    <PlayerAvatarCircle
+                      name={player.name}
+                      avatarUrl={player.avatar_url ?? null}
+                      sizeClass="h-7 w-7 text-[11px]"
+                    />
+                    <span>{player.name}</span>
+                  </span>
                   <span className="text-xs font-semibold">
                     {joinState.selectedPlayerIds.includes(player.id)
                       ? joinState.joinedPlayerIds.includes(player.id)

@@ -32,6 +32,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Admin can edit session details and fix DRAFT sessions.
 - Admin can set a per-session Splitwise payer override from session edit; new sessions default to the current default payer.
 - Admin can manage players (add, rename, deactivate/reactivate).
+- Admin can upload/replace/remove player avatars (JPEG/PNG/WebP up to 2MB).
 - Admin can close sessions immediately and trigger Splitwise expense recording.
 - Admin can rotate the club access token and share a new invite link.
 - Admin can view the current club access token/link from DB (not browser localStorage).
@@ -39,6 +40,8 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Admin can edit Gmail OAuth config (`client_id`, `client_secret`, `refresh_token`) stored in Supabase.
 - Admin can manage admin accounts (create/update/deactivate/reset password) and change own password.
 - Session closing cron creates Splitwise expenses and marks sessions CLOSED, idempotently.
+- Sessions display participants as avatar circles by default; tapping toggles participant names.
+- Join/Withdraw player picker shows avatar + name rows.
 
 ## Access Model
 - A single club-level access token is embedded in the shared link once and stored in localStorage.

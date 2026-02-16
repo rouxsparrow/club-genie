@@ -4,6 +4,7 @@ import { Lock, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import AdminAccountsPanel from "../../components/admin-accounts-panel";
 import AdminNavbar from "../../components/admin-navbar";
+import PlayerAvatarCircle from "../../components/player-avatar-circle";
 
 type TabKey = "accounts" | "players" | "club" | "automation" | "emails" | "gmail" | "splitwise";
 
@@ -13,6 +14,8 @@ type Player = {
   active: boolean;
   splitwise_user_id?: number | null;
   is_default_payer?: boolean;
+  avatar_path?: string | null;
+  avatar_url?: string | null;
 };
 
 type PlayersResponse = {
@@ -157,6 +160,9 @@ export default function AdminPage() {
   const [splitwiseGroupDetailIdInput, setSplitwiseGroupDetailIdInput] = useState("");
   const [splitwiseGroupDetailResult, setSplitwiseGroupDetailResult] = useState<{ group: unknown; raw: unknown } | null>(null);
   const [splitwiseUserIdDrafts, setSplitwiseUserIdDrafts] = useState<Record<string, string>>({});
+  const [avatarFileDrafts, setAvatarFileDrafts] = useState<Record<string, File | null>>({});
+  const [avatarUploadingByPlayerId, setAvatarUploadingByPlayerId] = useState<Record<string, boolean>>({});
+  const [avatarRemovingByPlayerId, setAvatarRemovingByPlayerId] = useState<Record<string, boolean>>({});
   const [splitwiseExpenseStatusFilter, setSplitwiseExpenseStatusFilter] = useState<"ALL" | "PENDING" | "CREATED" | "FAILED">("ALL");
   const [splitwiseExpenseRecords, setSplitwiseExpenseRecords] = useState<
     Array<{
@@ -350,6 +356,10 @@ export default function AdminPage() {
       setPlayersError(data.error ?? "Failed to load players.");
     }
     setLoadingPlayers(false);
+  };
+
+  const updatePlayerInState = (player: Player) => {
+    setPlayers((prev) => prev.map((entry) => (entry.id === player.id ? { ...entry, ...player } : entry)));
   };
 
   const refreshAutomationSettings = async () => {
@@ -613,6 +623,56 @@ export default function AdminPage() {
       })
     );
     setActionMessage(enabled ? "Default payer updated." : "Default payer cleared.");
+  };
+
+  const uploadPlayerAvatar = async (playerId: string) => {
+    const file = avatarFileDrafts[playerId];
+    if (!file) {
+      setActionMessage("Choose an image first.");
+      return;
+    }
+
+    setActionMessage(null);
+    setAvatarUploadingByPlayerId((prev) => ({ ...prev, [playerId]: true }));
+
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch(`/api/admin/players/${playerId}/avatar`, {
+      method: "POST",
+      credentials: "include",
+      body: formData
+    });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; player?: Player; error?: string } | null;
+    if (!data?.ok || !data.player) {
+      setActionMessage(data?.error ?? "Failed to upload avatar.");
+      setAvatarUploadingByPlayerId((prev) => ({ ...prev, [playerId]: false }));
+      return;
+    }
+
+    updatePlayerInState(data.player);
+    setAvatarFileDrafts((prev) => ({ ...prev, [playerId]: null }));
+    setActionMessage("Avatar updated.");
+    setAvatarUploadingByPlayerId((prev) => ({ ...prev, [playerId]: false }));
+  };
+
+  const removePlayerAvatar = async (playerId: string) => {
+    setActionMessage(null);
+    setAvatarRemovingByPlayerId((prev) => ({ ...prev, [playerId]: true }));
+    const response = await fetch(`/api/admin/players/${playerId}/avatar`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; player?: Player; error?: string } | null;
+    if (!data?.ok || !data.player) {
+      setActionMessage(data?.error ?? "Failed to remove avatar.");
+      setAvatarRemovingByPlayerId((prev) => ({ ...prev, [playerId]: false }));
+      return;
+    }
+
+    updatePlayerInState(data.player);
+    setAvatarFileDrafts((prev) => ({ ...prev, [playerId]: null }));
+    setActionMessage("Avatar removed.");
+    setAvatarRemovingByPlayerId((prev) => ({ ...prev, [playerId]: false }));
   };
 
   const saveSplitwiseSettings = async () => {
@@ -1012,7 +1072,14 @@ export default function AdminPage() {
                       ) : (
                         <div className="grid gap-3">
                           <div className="flex flex-wrap items-center justify-between gap-3">
-                            <strong>{player.name}</strong>
+                            <div className="flex items-center gap-3">
+                              <PlayerAvatarCircle
+                                name={player.name}
+                                avatarUrl={player.avatar_url ?? null}
+                                sizeClass="h-10 w-10 text-sm"
+                              />
+                              <strong>{player.name}</strong>
+                            </div>
                             <div className="flex gap-2">
                               <button
                                 type="button"
@@ -1029,6 +1096,44 @@ export default function AdminPage() {
                                 Deactivate
                               </button>
                             </div>
+                          </div>
+                          <div className="grid gap-3 rounded-2xl border border-slate-200/60 bg-slate-50 p-3 text-xs dark:border-ink-700/60 dark:bg-ink-900/30">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                onChange={(event) =>
+                                  setAvatarFileDrafts((prev) => ({
+                                    ...prev,
+                                    [player.id]: event.target.files && event.target.files[0] ? event.target.files[0] : null
+                                  }))
+                                }
+                                className="block max-w-full text-xs file:mr-2 file:rounded-full file:border-0 file:bg-emerald-500 file:px-3 file:py-1 file:font-semibold file:text-slate-900 hover:file:opacity-90"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => uploadPlayerAvatar(player.id)}
+                                disabled={!avatarFileDrafts[player.id] || avatarUploadingByPlayerId[player.id]}
+                                className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 disabled:opacity-60 dark:border-ink-700/60 dark:text-slate-100"
+                              >
+                                {avatarUploadingByPlayerId[player.id]
+                                  ? "Uploading..."
+                                  : player.avatar_url || player.avatar_path
+                                  ? "Replace Avatar"
+                                  : "Upload Avatar"}
+                              </button>
+                              {player.avatar_url || player.avatar_path ? (
+                                <button
+                                  type="button"
+                                  onClick={() => removePlayerAvatar(player.id)}
+                                  disabled={avatarRemovingByPlayerId[player.id]}
+                                  className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 disabled:opacity-60 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
+                                >
+                                  {avatarRemovingByPlayerId[player.id] ? "Removing..." : "Remove Avatar"}
+                                </button>
+                              ) : null}
+                            </div>
+                            <p className="text-[11px] text-slate-400">JPEG, PNG, or WebP up to 2MB.</p>
                           </div>
                           <div className="grid gap-3 rounded-2xl border border-slate-200/60 bg-slate-50 p-3 text-xs dark:border-ink-700/60 dark:bg-ink-900/30 md:grid-cols-2">
                             <label className="font-semibold">
@@ -1075,7 +1180,14 @@ export default function AdminPage() {
                 <ul className="mt-4 space-y-3">
                   {inactivePlayers.map((player) => (
                     <li key={player.id} className="flex items-center justify-between gap-3">
-                      <span>{player.name}</span>
+                      <span className="inline-flex items-center gap-2">
+                        <PlayerAvatarCircle
+                          name={player.name}
+                          avatarUrl={player.avatar_url ?? null}
+                          sizeClass="h-8 w-8 text-xs"
+                        />
+                        <span>{player.name}</span>
+                      </span>
                       <button
                         type="button"
                         onClick={() => setPlayerActive(player.id, true)}

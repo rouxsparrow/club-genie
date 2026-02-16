@@ -61,6 +61,12 @@
 - Decision: Move admin auth from hardcoded credentials to `admin_users` (username/password hash), keep signed `admin_session` cookie, and embed account id + `session_version` in cookie payload so middleware can revoke sessions on password reset/deactivation. Keep a flag-gated break-glass env fallback for bootstrap/recovery only.
 - Rationale: Removes static credentials from code, supports multi-admin operations, and enables immediate access revocation without waiting for cookie expiry.
 
+## ADR-0011: Store Player Avatars in Public Supabase Storage with Admin-only Server Uploads
+- Date: 2026-02-16
+- Status: Accepted
+- Decision: Add `players.avatar_path` and store avatar files in a public Supabase bucket `player-avatars` (2MB, jpeg/png/webp). Upload/replace/remove operations are exposed only through admin server routes; public/session payloads return computed `avatar_url` and fall back safely when the avatar migration is not yet applied.
+- Rationale: Keeps avatar management simple for free-tier infra, avoids exposing service credentials in the browser, and supports graceful rollout in partially-migrated environments.
+
 ## Pending Decisions
 - Player identity model (predefined list vs free-text vs hybrid).
 - Session edit rules (post-close edits, participant locking, Splitwise regeneration).

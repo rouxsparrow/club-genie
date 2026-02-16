@@ -79,6 +79,12 @@
 - Decision: Add `automation_run_history` to persist ingestion/splitwise run outcomes (`job_type`, `run_source`, `status`, `summary`, `error_message`, timing fields). `run-ingestion` and `run-splitwise-sync` write run records using service-role access. Admin tabs expose filtered run-history queries for both automation tracks.
 - Rationale: Provides auditability for scheduled jobs on free-tier infrastructure, helps diagnose cron/manual differences quickly, and avoids relying on external CI logs as the only source of truth.
 
+## ADR-0014: Move Receipt Fetch Scheduling from Supabase Gmail OAuth to Gmail Apps Script Bridge
+- Date: 2026-02-16
+- Status: Accepted
+- Decision: Use a Gmail Apps Script bridge as the ingestion scheduler and email fetch source. The bridge runs daily via Apps Script trigger, pulls Gmail receipts, calls Supabase `ingest-receipts` with `AUTOMATION_SECRET`, applies a processed label, and logs summary records to `automation_run_history` via `log-ingestion-run`. Admin manual run and preview now call the bridge webhook (`manual_ingest` / `preview`) via server-only envs `APPS_SCRIPT_BRIDGE_URL` and `APPS_SCRIPT_BRIDGE_SECRET`. Keep existing Supabase Gmail OAuth functions as rollback path only.
+- Rationale: Removes app-runtime dependency on Gmail refresh-token exchange (`gmail_token_failed` risk), keeps the stack within free-tier limits, preserves existing ingestion parsing contracts, and allows fast recovery with admin manual runs.
+
 ## Pending Decisions
 - Player identity model (predefined list vs free-text vs hybrid).
 - Session edit rules (post-close edits, participant locking, Splitwise regeneration).

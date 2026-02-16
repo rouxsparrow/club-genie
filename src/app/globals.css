@@ -194,7 +194,8 @@ body {
     0 0 10px rgba(74, 222, 168, 0.6),
     0 0 24px rgba(52, 211, 153, 0.46),
     0 0 44px rgba(16, 185, 129, 0.3);
-  animation: neon-open-flicker 13.6s steps(220, end) infinite;
+  animation: neon-open-flicker var(--open-flicker-duration, 13.6s) steps(220, end) infinite;
+  animation-delay: var(--open-flicker-delay, 0s);
 }
 
 .neon-open-badge::before {
@@ -206,7 +207,7 @@ body {
   pointer-events: none;
   background: radial-gradient(circle, rgba(52, 211, 153, 0.36) 0%, rgba(16, 185, 129, 0.1) 48%, transparent 74%);
   filter: blur(2px);
-  opacity: 0.88;
+  opacity: var(--open-glow-opacity, 0.88);
 }
 
 .neon-open-badge::after {
@@ -273,7 +274,8 @@ html:not(.dark) .neon-open-badge {
     0 0 6px rgba(74, 222, 168, 0.3),
     0 0 14px rgba(52, 211, 153, 0.22),
     0 0 24px rgba(16, 185, 129, 0.14);
-  animation: neon-open-flicker-light 13.6s steps(220, end) infinite;
+  animation: neon-open-flicker-light var(--open-flicker-duration, 13.6s) steps(220, end) infinite;
+  animation-delay: var(--open-flicker-delay, 0s);
 }
 
 html:not(.dark) .neon-open-badge::before {

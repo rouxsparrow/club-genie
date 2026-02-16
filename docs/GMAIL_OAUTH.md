@@ -1,4 +1,6 @@
-# Gmail OAuth Setup
+# Gmail OAuth Setup (Legacy Rollback Path)
+
+This setup is retained for rollback only. Primary ingestion now uses the Apps Script bridge documented in `docs/ingestion/gmail-setup.md`.
 
 ## Google Cloud Console
 1) OAuth consent screen:

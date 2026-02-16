@@ -1,8 +1,7 @@
 name: Run Receipt Ingestion
 
 on:
-  schedule:
-    - cron: "30 15 * * *"
+  # Daily scheduling is owned by Apps Script bridge trigger; keep manual dispatch for rollback.
   workflow_dispatch:
 
 jobs:
@@ -24,7 +23,7 @@ jobs:
             -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
             -H "apikey: ${SUPABASE_ANON_KEY}" \
             -H "x-automation-secret: ${AUTOMATION_SECRET}" \
-            -H "x-run-source: GITHUB_CRON" \
+            -H "x-run-source: API" \
             -H "content-type: application/json" \
             --data '{}')
 

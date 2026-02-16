@@ -14,6 +14,7 @@ import {
   validateClubToken,
   withdrawSession
 } from "../../lib/edge";
+import { getOpenBadgeMotionVars } from "../../lib/open-badge-motion";
 import { MAX_GUEST_COUNT, normalizeGuestCount } from "../../lib/session-guests";
 import { combineDateAndTimeToIso, isQuarterHourTime, toLocalTime } from "../../lib/session-time";
 
@@ -970,6 +971,7 @@ export default function SessionsClient() {
                             ? "bg-slate-200 text-slate-600 dark:bg-ink-700 dark:text-slate-200"
                             : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
                         } ${session.status === "OPEN" ? "neon-open-badge" : ""}`}
+                        style={session.status === "OPEN" ? getOpenBadgeMotionVars(session.id) : undefined}
                       >
                         {session.status}
                       </span>
@@ -1084,11 +1086,7 @@ export default function SessionsClient() {
           </div>
 
           <div className="hidden overflow-hidden rounded-3xl border border-slate-200/80 bg-white/90 shadow-sm dark:border-ink-700/60 dark:bg-ink-800/80 md:block">
-            <div className="grid grid-cols-[0.55fr_0.95fr_0.8fr_1.05fr_1.45fr_2.4fr_0.6fr_1.1fr] gap-4 border-b border-slate-200/60 bg-slate-100/70 px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-ink-700/60 dark:bg-ink-900/40 dark:text-slate-300">
-              <span className="inline-flex items-center gap-2">
-                <CalendarDays size={13} className="text-emerald-400 dark:text-emerald-300" />
-                Day
-              </span>
+            <div className="grid grid-cols-[0.95fr_0.8fr_1.05fr_1.45fr_2.4fr_0.6fr_1.1fr] gap-4 border-b border-slate-200/60 bg-slate-100/70 px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-ink-700/60 dark:bg-ink-900/40 dark:text-slate-300">
               <button type="button" onClick={() => toggleSort("session_date")} className="inline-flex items-center gap-2 text-left">
                 <CalendarDays size={13} className="text-emerald-400 dark:text-emerald-300" />
                 Date
@@ -1133,14 +1131,11 @@ export default function SessionsClient() {
                 return (
                   <div
                     key={session.id}
-                    className={`grid grid-cols-[0.55fr_0.95fr_0.8fr_1.05fr_1.45fr_2.4fr_0.6fr_1.1fr] items-start gap-4 px-6 py-5 text-sm transition-all duration-700 ease-out ${
+                    className={`grid grid-cols-[0.95fr_0.8fr_1.05fr_1.45fr_2.4fr_0.6fr_1.1fr] items-start gap-4 px-6 py-5 text-sm transition-all duration-700 ease-out ${
                       entranceReady ? "translate-x-0 opacity-100" : "translate-x-8 opacity-0"
                     }`}
                     style={{ transitionDelay: `${Math.min(120 + index * 70, 600)}ms` }}
                   >
-                    <div className="text-slate-500 dark:text-slate-300">
-                      {new Date(session.session_date).toLocaleDateString(undefined, { weekday: "short" })}
-                    </div>
                     <div className="font-semibold">{formatDate(session.session_date)}</div>
                     <div className="text-slate-600 dark:text-slate-300">
                       <p>{sessionTimeLines.line1}</p>
@@ -1214,6 +1209,7 @@ export default function SessionsClient() {
                               ? "bg-slate-200 text-slate-600 dark:bg-ink-700 dark:text-slate-200"
                               : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
                           } ${session.status === "OPEN" ? "neon-open-badge" : ""}`}
+                          style={session.status === "OPEN" ? getOpenBadgeMotionVars(session.id) : undefined}
                         >
                           {session.status}
                         </span>

@@ -19,7 +19,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Admin manually closes a session and triggers Splitwise expense.
 
 ## Functional Requirements
-- Ingest Playtomic receipts via Gmail API (read-only) using HTML/body parsing.
+- Ingest Playtomic receipts via Gmail Apps Script bridge (daily trigger + manual webhook actions) using HTML/body parsing.
 - Parse Playtomic receipt body fields: `Date`, `Time`, `Club ... , <Court>`, and `Paid ...`.
 - Receipt subject keyword matching is configurable by admin (default: `Playtomic`, `Receipt`).
 - Deduplicate receipts by Gmail `messageId` stored in the database.
@@ -37,9 +37,10 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Admin can close sessions immediately and trigger Splitwise expense recording.
 - Admin can rotate the club access token and share a new invite link.
 - Admin can view the current club access token/link from DB (not browser localStorage).
-- Admin can preview raw Gmail receipt bodies (text/HTML) in the Automation area for parser debugging.
+- Admin can preview raw Gmail receipt bodies (text/HTML) in the Automation area via the Apps Script bridge for parser debugging.
 - Admin can query ingestion and Splitwise automation run history (cron/manual source, status, summary, errors) from Admin tabs.
-- Admin can edit Gmail OAuth config (`client_id`, `client_secret`, `refresh_token`) stored in Supabase.
+- Apps Script ingestion writes run summaries into `automation_run_history` so Admin history remains available after scheduler migration.
+- Admin can keep legacy Gmail OAuth config (`client_id`, `client_secret`, `refresh_token`) in Supabase for rollback only.
 - Admin can manage admin accounts (create/update/deactivate/reset password) and change own password.
 - Session closing cron creates Splitwise expenses and marks sessions CLOSED, idempotently.
 - Sessions display participants as avatar circles by default; tapping toggles participant names.
@@ -58,7 +59,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Admin session uses a signed httpOnly cookie (`admin_session`) with account id + session version snapshot.
 - Passwords are stored hashed (scrypt) in `admin_users.password_hash`.
 - Optional break-glass login is flag-gated by env (`ENABLE_ADMIN_BREAKGLASS=true`) for recovery only.
-- Scheduled ingestion uses a dedicated machine secret (`AUTOMATION_SECRET`), separate from the club invite token.
+- Scheduled ingestion uses dedicated machine secrets (`AUTOMATION_SECRET` between bridge and Supabase, plus `APPS_SCRIPT_BRIDGE_SECRET` between app and bridge), separate from the club invite token.
 
 ### Token Setup (Admin)
 1. Generate a token: `openssl rand -hex 24`
@@ -72,7 +73,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Basic security: least-privilege API access and admin-only actions.
 
 ## Acceptance Criteria
-- Scheduled cron jobs create/update sessions from new receipts.
+- Scheduled Apps Script trigger creates/updates sessions from new receipts.
 - Failed parses create DRAFT sessions and send admin notifications.
 - Parse failures are visible in the in-app admin error queue.
 - Public registration flows allow join/withdraw for multiple players.

@@ -15,6 +15,8 @@ import {
   withdrawSession
 } from "../../lib/edge";
 import { getOpenBadgeMotionVars } from "../../lib/open-badge-motion";
+import { formatCourtLabelForDisplay, formatCourtTimeRangeForDisplay } from "../../lib/session-court-display";
+import { formatSessionLocationForDisplay } from "../../lib/session-location";
 import { MAX_GUEST_COUNT, normalizeGuestCount } from "../../lib/session-guests";
 import { combineDateAndTimeToIso, isQuarterHourTime, toLocalTime } from "../../lib/session-time";
 
@@ -260,10 +262,6 @@ function formatRangeWithSharedPeriod(
 
 function formatSessionTimeRangeMobile(start: string | null, end: string | null) {
   return formatRangeWithSharedPeriod(start, end, { alwaysMinutes: true, separator: " – " });
-}
-
-function formatCourtTimeRangeMobile(start: string | null, end: string | null) {
-  return formatRangeWithSharedPeriod(start, end, { alwaysMinutes: false, separator: "–" });
 }
 
 function formatSessionTimeRangeDesktopLines(start: string | null, end: string | null) {
@@ -996,7 +994,7 @@ export default function SessionsClient() {
                   </p>
                   <p className="mt-1 flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-300">
                     <MapPin size={14} className="text-emerald-400 dark:text-emerald-300" />
-                    <span>{session.location ?? "TBD"}</span>
+                    <span>{formatSessionLocationForDisplay(session.location)}</span>
                   </p>
                   {session.remarks ? <p className="mt-2 text-xs text-slate-500">{session.remarks}</p> : null}
                   <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
@@ -1010,7 +1008,7 @@ export default function SessionsClient() {
                       <ul className="mt-1 ml-6 space-y-1">
                         {courtItems.map((court) => (
                           <li key={court.id}>
-                            {court.court_label ?? "Court"} ({formatCourtTimeRangeMobile(court.start_time, court.end_time)})
+                            {formatCourtLabelForDisplay(court.court_label)} ({formatCourtTimeRangeForDisplay(court.start_time, court.end_time)})
                           </li>
                         ))}
                       </ul>
@@ -1142,7 +1140,7 @@ export default function SessionsClient() {
                       {sessionTimeLines.line2 ? <p>{sessionTimeLines.line2}</p> : null}
                     </div>
                     <div className="text-slate-600 dark:text-slate-300">
-                      <div>{session.location ?? "TBD"}</div>
+                      <div>{formatSessionLocationForDisplay(session.location)}</div>
                       {session.remarks ? <div className="mt-2 text-xs">{session.remarks}</div> : null}
                     </div>
                     <div className="text-slate-600 dark:text-slate-300">
@@ -1153,7 +1151,7 @@ export default function SessionsClient() {
                         <ul className="mt-1 space-y-1">
                           {courtItems.map((court) => (
                             <li key={court.id}>
-                              {court.court_label ?? "Court"} ({formatCourtTimeRangeMobile(court.start_time, court.end_time)})
+                              {formatCourtLabelForDisplay(court.court_label)} ({formatCourtTimeRangeForDisplay(court.start_time, court.end_time)})
                             </li>
                           ))}
                         </ul>

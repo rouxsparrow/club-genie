@@ -46,6 +46,8 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Sessions display participants as avatar circles by default; tapping toggles participant names.
 - Join/Withdraw player picker shows avatar + name rows.
 - Session cards show participant count as "`x players joined`", and include guest indicator when guests are added.
+- Sessions page location display removes a leading `Club` prefix for readability (display-only; stored value unchanged).
+- Sessions page court display removes a leading `Court` prefix and shows compact time ranges (for example, `P2 (5-6PM)`), display-only.
 - Splitwise share math includes guest shares and assigns those guest shares to the resolved session payer.
 
 ## Access Model

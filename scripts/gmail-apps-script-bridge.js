@@ -58,7 +58,7 @@ function runIngestionWithHistory_(options) {
   try {
     const result = processIngestion_({ query: options && options.query });
     const finishedAt = new Date();
-    logIngestionRun_({
+    const logOutcome = logIngestionRun_({
       runSource: normalizeRunSource_(options && options.runSource),
       status: "SUCCESS",
       startedAt,
@@ -73,11 +73,11 @@ function runIngestionWithHistory_(options) {
         fetch_failed: result.fetch_failed
       }
     });
-    return result;
+    return withHistoryLogging_(result, logOutcome);
   } catch (error) {
     const finishedAt = new Date();
     const message = errorToMessage_(error);
-    logIngestionRun_({
+    const logOutcome = logIngestionRun_({
       runSource: normalizeRunSource_(options && options.runSource),
       status: "FAILED",
       startedAt,
@@ -88,7 +88,7 @@ function runIngestionWithHistory_(options) {
       },
       errorMessage: message
     });
-    return { ok: false, error: message };
+    return withHistoryLogging_({ ok: false, error: message }, logOutcome);
   }
 }
 
@@ -145,7 +145,7 @@ function logIngestionRun_(input) {
   try {
     const config = readConfig_();
     const url = `${config.supabaseUrl.replace(/\/$/, "")}/functions/v1/log-ingestion-run`;
-    UrlFetchApp.fetch(url, {
+    const response = UrlFetchApp.fetch(url, {
       method: "post",
       muteHttpExceptions: true,
       contentType: "application/json",
@@ -164,9 +164,39 @@ function logIngestionRun_(input) {
         errorMessage: input.errorMessage || null
       })
     });
-  } catch (_) {
-    // Do not fail ingestion if run-history logging fails.
+
+    const statusCode = Number(response.getResponseCode());
+    const parsedBody = safeParseJson_(response.getContentText());
+    if (statusCode >= 200 && statusCode < 300) {
+      return { ok: true, statusCode, error: null };
+    }
+
+    const responseError =
+      parsedBody && typeof parsedBody.error === "string" && parsedBody.error.trim()
+        ? parsedBody.error.trim()
+        : "run_history_log_failed";
+    const error = `http_${statusCode}: ${responseError}`;
+    Logger.log(`log-ingestion-run failed: ${error}`);
+    return { ok: false, statusCode, error };
+  } catch (errorInput) {
+    const error = errorToMessage_(errorInput);
+    Logger.log(`log-ingestion-run failed: ${error}`);
+    return { ok: false, statusCode: null, error };
   }
+}
+
+function withHistoryLogging_(payload, logOutcome) {
+  const statusCode =
+    logOutcome && Number.isFinite(Number(logOutcome.statusCode)) ? Number(logOutcome.statusCode) : null;
+  const error =
+    logOutcome && typeof logOutcome.error === "string" && logOutcome.error.trim() ? logOutcome.error.trim() : null;
+  const ok = Boolean(logOutcome && logOutcome.ok);
+  return {
+    ...payload,
+    history_logged: ok,
+    history_log_status: statusCode,
+    history_log_error: error
+  };
 }
 
 function callIngestReceipts_(config, message) {

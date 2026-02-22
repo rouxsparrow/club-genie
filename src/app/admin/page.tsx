@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import AdminAccountsPanel from "../../components/admin-accounts-panel";
 import AdminNavbar from "../../components/admin-navbar";
 import PlayerAvatarCircle from "../../components/player-avatar-circle";
+import AnimatedBackground from "../../components/v2/AnimatedBackground";
+import "../globals-v2.css";
 
 type TabKey = "accounts" | "players" | "club" | "automation" | "emails" | "gmail" | "splitwise";
 
@@ -996,25 +998,31 @@ export default function AdminPage() {
   };
 
   if (!mounted) {
-    return <main />;
+    return (
+      <main className="v2-page v2-admin-page">
+        <AnimatedBackground />
+      </main>
+    );
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-16">
-      <header className="flex flex-col gap-6">
-        <AdminNavbar currentPath="/admin" />
-        <div className="flex flex-wrap items-start justify-between gap-6">
-          <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-500">Admin Console</p>
-          <h1 className="mt-2 text-4xl font-semibold">Club Control Room</h1>
-          <p className="mt-2 text-slate-500 dark:text-slate-300">
-            Manage players, access tokens, and session operations.
-          </p>
-        </div>
-        </div>
-      </header>
+    <main className="v2-page v2-admin-page">
+      <AnimatedBackground />
+      <div className="relative z-10 mx-auto max-w-5xl px-6 py-16">
+        <header className="flex flex-col gap-6">
+          <AdminNavbar currentPath="/admin" className="v2-admin-nav v2-admin-navbar" />
+          <div className="flex flex-wrap items-start justify-between gap-6">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-500">Admin Console</p>
+              <h1 className="mt-2 text-4xl font-semibold">Club Control Room</h1>
+              <p className="mt-2 text-slate-500 dark:text-slate-300">
+                Manage players, access tokens, and session operations.
+              </p>
+            </div>
+          </div>
+        </header>
 
-      <nav className="mt-8 flex flex-wrap gap-3">
+        <nav className="v2-admin-tab-nav mt-8 flex flex-wrap gap-3">
         <button
           type="button"
           onClick={() => setActiveTab("accounts")}
@@ -1092,7 +1100,7 @@ export default function AdminPage() {
         >
           Splitwise
         </button>
-      </nav>
+        </nav>
 
       {activeTab === "accounts" ? <AdminAccountsPanel /> : null}
 
@@ -2152,6 +2160,7 @@ export default function AdminPage() {
           </div>
         </section>
       ) : null}
+      </div>
     </main>
   );
 }

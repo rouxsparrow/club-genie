@@ -1,10 +1,14 @@
 "use client";
 
-import { ArrowUpDown, CalendarDays, CircleUserRound, Clock3, DollarSign, LayoutGrid, MapPin, Rows3, Users2 } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminNavbar from "../../components/admin-navbar";
-import PlayerAvatarCircle from "../../components/player-avatar-circle";
+import AnimatedBackground from "../../components/v2/AnimatedBackground";
+import Confetti from "../../components/v2/Confetti";
+import PlayerSelectionDialog from "../../components/v2/PlayerSelectionDialog";
+import SessionCard, { type Session as V2Session } from "../../components/v2/SessionCard";
+import SkeletonCard from "../../components/v2/SkeletonCard";
 import {
   getClubTokenStorageKey,
   joinSession,
@@ -14,19 +18,21 @@ import {
   validateClubToken,
   withdrawSession
 } from "../../lib/edge";
-import { getOpenBadgeMotionVars } from "../../lib/open-badge-motion";
 import { formatCourtLabelForDisplay, formatCourtTimeRangeForDisplay } from "../../lib/session-court-display";
 import { formatSessionLocationForDisplay } from "../../lib/session-location";
-import { MAX_GUEST_COUNT, normalizeGuestCount } from "../../lib/session-guests";
+import { normalizeGuestCount } from "../../lib/session-guests";
 import { combineDateAndTimeToIso, isQuarterHourTime, toLocalTime } from "../../lib/session-time";
+import {
+  groupSessionsByMonth,
+  parseSessionDateToLocalDate,
+  shouldIncludeSessionInFilter,
+  sortByDateAsc,
+  toSessionViewStatus,
+  type SessionsV2Filter
+} from "../../lib/sessions-v2-view";
 
 type GateState = "checking" | "denied" | "allowed";
-
-type StoredTokenResult = {
-  token: string | null;
-  shouldCleanUrl: boolean;
-};
-
+type StoredTokenResult = { token: string | null; shouldCleanUrl: boolean };
 type SessionSummary = {
   id: string;
   session_date: string;
@@ -40,42 +46,11 @@ type SessionSummary = {
   location: string | null;
   remarks: string | null;
 };
-
-type CourtDetail = {
-  id: string;
-  session_id: string;
-  court_label: string | null;
-  start_time: string | null;
-  end_time: string | null;
-};
-
-type ParticipantDetail = {
-  session_id: string;
-  player: { id: string; name: string; avatar_url?: string | null } | null;
-};
-
-type Player = {
-  id: string;
-  name: string;
-  active: boolean;
-  avatar_url?: string | null;
-};
-
-type AdminPlayer = {
-  id: string;
-  name: string;
-  active: boolean;
-  is_default_payer?: boolean;
-};
-
-type JoinState = {
-  open: boolean;
-  sessionId: string | null;
-  selectedPlayerIds: string[];
-  joinedPlayerIds: string[];
-  isSubmitting: boolean;
-};
-
+type CourtDetail = { id: string; session_id: string; court_label: string | null; start_time: string | null; end_time: string | null };
+type ParticipantDetail = { session_id: string; player: { id: string; name: string; avatar_url?: string | null } | null };
+type Player = { id: string; name: string; active: boolean; avatar_url?: string | null };
+type AdminPlayer = { id: string; name: string; active: boolean; is_default_payer?: boolean };
+type JoinState = { open: boolean; sessionId: string | null; selectedPlayerIds: string[]; joinedPlayerIds: string[]; isSubmitting: boolean };
 type SessionFormState = {
   open: boolean;
   mode: "create" | "edit";
@@ -91,17 +66,12 @@ type SessionFormState = {
   courts: { id: string; court_label: string; start_time: string; end_time: string }[];
   isSubmitting: boolean;
 };
-
-type SortKey = "session_date" | "status";
-type SortDirection = "asc" | "desc";
-
+type SessionsCardModel = V2Session & { sourceStatus: string };
 const QUARTER_MINUTES = ["00", "15", "30", "45"] as const;
 const USE_DEFAULT_PAYER_VALUE = "__USE_DEFAULT_PAYER__";
 
 function to12HourParts(value: string) {
-  if (!/^\d{2}:\d{2}$/.test(value)) {
-    return { hour: "12", minute: "00", period: "AM" as const };
-  }
+  if (!/^\d{2}:\d{2}$/.test(value)) return { hour: "12", minute: "00", period: "AM" as const };
   const [hourText, minuteText] = value.split(":");
   const hour24 = Number(hourText);
   const minute = QUARTER_MINUTES.includes(minuteText as (typeof QUARTER_MINUTES)[number]) ? minuteText : "00";
@@ -115,16 +85,11 @@ function from12HourParts(hourText: string, minuteText: string, period: "AM" | "P
   if (!Number.isInteger(hour12) || hour12 < 1 || hour12 > 12) return "";
   if (!QUARTER_MINUTES.includes(minuteText as (typeof QUARTER_MINUTES)[number])) return "";
   let hour24 = hour12 % 12;
-  if (period === "PM") {
-    hour24 += 12;
-  }
+  if (period === "PM") hour24 += 12;
   return `${String(hour24).padStart(2, "0")}:${minuteText}`;
 }
 
-type QuarterTimeSelectProps = {
-  value: string;
-  onChange: (value: string) => void;
-};
+type QuarterTimeSelectProps = { value: string; onChange: (value: string) => void };
 
 function QuarterTimeSelect({ value, onChange }: QuarterTimeSelectProps) {
   const hasValue = isQuarterHourTime(value);
@@ -132,15 +97,12 @@ function QuarterTimeSelect({ value, onChange }: QuarterTimeSelectProps) {
   const hourValue = normalized?.hour ?? "";
   const minuteValue = normalized?.minute ?? "";
   const periodValue = normalized?.period ?? "";
-
   return (
-    <div className="mt-2 grid grid-cols-3 gap-2">
+    <div className="v2-admin-time-grid">
       <select
         value={hourValue}
-        onChange={(event) =>
-          onChange(from12HourParts(event.target.value, minuteValue || "00", (periodValue || "AM") as "AM" | "PM"))
-        }
-        className="w-full rounded-xl border border-slate-200 px-2 py-2 text-sm text-slate-900 dark:border-ink-700/60 dark:bg-ink-800 dark:text-slate-100"
+        onChange={(event) => onChange(from12HourParts(event.target.value, minuteValue || "00", (periodValue || "AM") as "AM" | "PM"))}
+        className="v2-admin-select"
       >
         <option value="">Hour</option>
         {Array.from({ length: 12 }).map((_, idx) => {
@@ -154,10 +116,8 @@ function QuarterTimeSelect({ value, onChange }: QuarterTimeSelectProps) {
       </select>
       <select
         value={minuteValue}
-        onChange={(event) =>
-          onChange(from12HourParts(hourValue || "12", event.target.value, (periodValue || "AM") as "AM" | "PM"))
-        }
-        className="w-full rounded-xl border border-slate-200 px-2 py-2 text-sm text-slate-900 dark:border-ink-700/60 dark:bg-ink-800 dark:text-slate-100"
+        onChange={(event) => onChange(from12HourParts(hourValue || "12", event.target.value, (periodValue || "AM") as "AM" | "PM"))}
+        className="v2-admin-select"
       >
         <option value="">Min</option>
         {QUARTER_MINUTES.map((minute) => (
@@ -168,10 +128,8 @@ function QuarterTimeSelect({ value, onChange }: QuarterTimeSelectProps) {
       </select>
       <select
         value={periodValue}
-        onChange={(event) =>
-          onChange(from12HourParts(hourValue || "12", minuteValue || "00", event.target.value as "AM" | "PM"))
-        }
-        className="w-full rounded-xl border border-slate-200 px-2 py-2 text-sm text-slate-900 dark:border-ink-700/60 dark:bg-ink-800 dark:text-slate-100"
+        onChange={(event) => onChange(from12HourParts(hourValue || "12", minuteValue || "00", event.target.value as "AM" | "PM"))}
+        className="v2-admin-select"
       >
         <option value="">AM/PM</option>
         <option value="AM">AM</option>
@@ -184,152 +142,22 @@ function QuarterTimeSelect({ value, onChange }: QuarterTimeSelectProps) {
 function readTokenFromLocation(searchParams: URLSearchParams): StoredTokenResult {
   const key = getClubTokenStorageKey();
   const tokenFromUrl = searchParams.get("t");
-
   if (tokenFromUrl) {
     localStorage.setItem(key, tokenFromUrl);
     return { token: tokenFromUrl, shouldCleanUrl: true };
   }
-
-  const existingToken = localStorage.getItem(key);
-  return { token: existingToken, shouldCleanUrl: false };
+  return { token: localStorage.getItem(key), shouldCleanUrl: false };
 }
 
 function clearStoredToken() {
-  const key = getClubTokenStorageKey();
-  localStorage.removeItem(key);
+  localStorage.removeItem(getClubTokenStorageKey());
 }
 
-function formatDate(dateValue: string) {
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) {
-    return dateValue;
-  }
-  return date.toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric"
-  });
-}
-
-type TimeToken = {
-  text: string;
-  period: string;
-};
-
-function toTimeToken(value: string | null, alwaysMinutes: boolean): TimeToken | null {
-  if (!value) return null;
+function formatTimeForCard(value: string | null) {
+  if (!value) return "TBD";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-
-  const parts = new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true
-  }).formatToParts(date);
-
-  const hour = parts.find((part) => part.type === "hour")?.value ?? "";
-  const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
-  const periodRaw = parts.find((part) => part.type === "dayPeriod")?.value ?? "";
-  const period = periodRaw.toUpperCase();
-  const text = alwaysMinutes || minute !== "00" ? `${hour}:${minute}` : hour;
-
-  if (!hour) return null;
-  return { text, period };
-}
-
-function formatRangeWithSharedPeriod(
-  start: string | null,
-  end: string | null,
-  options: { alwaysMinutes: boolean; separator: string }
-) {
-  const startToken = toTimeToken(start, options.alwaysMinutes);
-  const endToken = toTimeToken(end, options.alwaysMinutes);
-
-  if (!startToken && !endToken) return "TBD";
-  if (!startToken || !endToken) {
-    const fallback = (token: TimeToken | null) => (token ? `${token.text}${token.period ? ` ${token.period}` : ""}` : "TBD");
-    return `${fallback(startToken)}${options.separator}${fallback(endToken)}`;
-  }
-
-  if (startToken.period && endToken.period && startToken.period === endToken.period) {
-    return `${startToken.text}${options.separator}${endToken.text} ${endToken.period}`;
-  }
-
-  return `${startToken.text}${startToken.period ? ` ${startToken.period}` : ""}${options.separator}${endToken.text}${
-    endToken.period ? ` ${endToken.period}` : ""
-  }`;
-}
-
-function formatSessionTimeRangeMobile(start: string | null, end: string | null) {
-  return formatRangeWithSharedPeriod(start, end, { alwaysMinutes: true, separator: " – " });
-}
-
-function formatSessionTimeRangeDesktopLines(start: string | null, end: string | null) {
-  const startToken = toTimeToken(start, true);
-  const endToken = toTimeToken(end, true);
-
-  if (!startToken && !endToken) {
-    return { line1: "TBD", line2: "" };
-  }
-
-  if (!startToken || !endToken) {
-    const fallback = (token: TimeToken | null) => (token ? `${token.text}${token.period ? ` ${token.period}` : ""}` : "TBD");
-    return { line1: `${fallback(startToken)} -`, line2: fallback(endToken) };
-  }
-
-  if (startToken.period && endToken.period && startToken.period === endToken.period) {
-    return { line1: `${startToken.text} -`, line2: `${endToken.text} ${endToken.period}` };
-  }
-
-  return {
-    line1: `${startToken.text}${startToken.period ? ` ${startToken.period}` : ""} -`,
-    line2: `${endToken.text}${endToken.period ? ` ${endToken.period}` : ""}`
-  };
-}
-
-function getParticipantNames(participants: ParticipantDetail[]) {
-  return participants
-    .map((entry) => entry.player?.name)
-    .filter((name): name is string => Boolean(name));
-}
-
-function getPlayerSelectionStatus(playerId: string, selectedIds: string[], joinedIds: string[]) {
-  const selected = selectedIds.includes(playerId);
-  const joined = joinedIds.includes(playerId);
-  if (selected && joined) return "Joined";
-  if (selected && !joined) return "Will join";
-  if (!selected && joined) return "Will withdraw";
-  return "Not joined";
-}
-
-function ParticipantAvatarGrid({
-  participants,
-  guestCount
-}: {
-  participants: ParticipantDetail[];
-  guestCount: number;
-}) {
-  return (
-    <span className="grid grid-cols-6 gap-1.5">
-      {participants.map((entry, avatarIndex) => {
-        if (!entry.player) return null;
-        return (
-          <PlayerAvatarCircle
-            key={`${entry.player.id}:${avatarIndex}`}
-            name={entry.player.name}
-            avatarUrl={entry.player.avatar_url ?? null}
-            sizeClass="h-8 w-8 text-[11px]"
-          />
-        );
-      })}
-      {guestCount > 0 ? (
-        <span className="inline-flex h-8 w-8 shrink-0 flex-col items-center justify-center rounded-full border border-slate-200/80 bg-slate-100 text-[9px] font-semibold text-slate-600 dark:border-ink-700/60 dark:bg-ink-700 dark:text-slate-200">
-          <CircleUserRound size={12} />
-          <span className="leading-none">x{guestCount}</span>
-        </span>
-      ) : null}
-    </span>
-  );
+  if (Number.isNaN(date.getTime())) return "TBD";
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).format(date);
 }
 
 function buildEmptyForm(): SessionFormState {
@@ -360,6 +188,7 @@ export default function SessionsClient() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [adminPlayers, setAdminPlayers] = useState<AdminPlayer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<SessionsV2Filter>("upcoming");
   const [joinState, setJoinState] = useState<JoinState>({
     open: false,
     sessionId: null,
@@ -375,11 +204,8 @@ export default function SessionsClient() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [formState, setFormState] = useState<SessionFormState>(buildEmptyForm());
   const [formMessage, setFormMessage] = useState<string | null>(null);
-  const [showPastSessions, setShowPastSessions] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>("session_date");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
-  const [entranceReady, setEntranceReady] = useState(false);
-  const [expandedParticipantNames, setExpandedParticipantNames] = useState<Record<string, boolean>>({});
+  const [confettiTrigger, setConfettiTrigger] = useState(0);
+  const [confettiOrigin, setConfettiOrigin] = useState({ x: 0.5, y: 0.7 });
   const showDevDelete = isAdmin && process.env.NODE_ENV === "development";
 
   const courtsBySession = useMemo(() => {
@@ -398,51 +224,70 @@ export default function SessionsClient() {
     return map;
   }, [participants]);
 
-  const defaultPayer = useMemo(
-    () => adminPlayers.find((player) => Boolean(player.is_default_payer)) ?? null,
-    [adminPlayers]
-  );
+  const defaultPayer = useMemo(() => adminPlayers.find((player) => Boolean(player.is_default_payer)) ?? null, [adminPlayers]);
 
   const payerOptions = useMemo<AdminPlayer[]>(() => {
     const adminActive = adminPlayers.filter((player) => player.active);
     if (adminActive.length > 0) return adminActive;
     return players
       .filter((player) => player.active)
-      .map((player) => ({
-      id: player.id,
-      name: player.name,
-      active: player.active,
-      is_default_payer: false
-      }));
+      .map((player) => ({ id: player.id, name: player.name, active: player.active, is_default_payer: false }));
   }, [adminPlayers, players]);
 
-  const displayedSessions = useMemo(() => {
-    const filtered = sessions.filter((session) => (showPastSessions ? session.status !== "OPEN" : session.status === "OPEN"));
-    const sorted = [...filtered].sort((a, b) => {
-      if (sortKey === "status") {
-        const cmp = a.status.localeCompare(b.status);
-        return sortDirection === "asc" ? cmp : -cmp;
-      }
-      const aTime = new Date(a.session_date).getTime();
-      const bTime = new Date(b.session_date).getTime();
-      if (Number.isNaN(aTime) || Number.isNaN(bTime)) return 0;
-      return sortDirection === "asc" ? aTime - bTime : bTime - aTime;
+  const sessionSummaryById = useMemo(() => {
+    const map = new Map<string, SessionSummary>();
+    for (const session of sessions) map.set(session.id, session);
+    return map;
+  }, [sessions]);
+
+  const sessionCards = useMemo<SessionsCardModel[]>(() => {
+    const mapped = sessions.map((session) => {
+      const sessionStatus = toSessionViewStatus(session.status);
+      const sessionCourts = courtsBySession[session.id] ?? [];
+      const sessionParticipants = participantsBySession[session.id] ?? [];
+      const date = parseSessionDateToLocalDate(session.session_date);
+      const validDate = Number.isNaN(date.getTime()) ? new Date() : date;
+      const guestCountForSession = normalizeGuestCount(session.guest_count);
+      const playerCount = sessionParticipants.filter((entry) => Boolean(entry.player?.id)).length;
+      return {
+        id: session.id,
+        date: validDate,
+        startTime: formatTimeForCard(session.start_time),
+        endTime: formatTimeForCard(session.end_time),
+        location: formatSessionLocationForDisplay(session.location),
+        status: sessionStatus,
+        sourceStatus: session.status,
+        participantCount: playerCount,
+        participants: sessionParticipants
+          .filter((entry) => Boolean(entry.player?.id) && Boolean(entry.player?.name))
+          .map((entry) => ({ id: entry.player?.id as string, name: entry.player?.name as string, avatarUrl: entry.player?.avatar_url ?? null })),
+        courts: sessionCourts.map((court) => ({
+          id: court.id,
+          label: formatCourtLabelForDisplay(court.court_label),
+          timeRange: formatCourtTimeRangeForDisplay(court.start_time, court.end_time)
+        })),
+        isJoined: sessionParticipants.some((entry) => Boolean(entry.player?.id)),
+        joinedPlayerIds: sessionParticipants.map((entry) => entry.player?.id).filter((id): id is string => Boolean(id)),
+        guestCount: guestCountForSession,
+        splitwiseStatus: session.splitwise_status ?? null,
+        maxParticipants: undefined
+      } satisfies SessionsCardModel;
     });
-    return sorted;
-  }, [sessions, showPastSessions, sortDirection, sortKey]);
+    return sortByDateAsc(mapped);
+  }, [sessions, courtsBySession, participantsBySession]);
 
-  const toggleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setSortKey(key);
-    setSortDirection("asc");
-  };
+  const sessionCardsById = useMemo(() => {
+    const map = new Map<string, SessionsCardModel>();
+    for (const session of sessionCards) map.set(session.id, session);
+    return map;
+  }, [sessionCards]);
 
-  const toggleParticipantsExpanded = (sessionId: string) => {
-    setExpandedParticipantNames((prev) => ({ ...prev, [sessionId]: !prev[sessionId] }));
-  };
+  const filteredCards = useMemo(
+    () => sessionCards.filter((session) => shouldIncludeSessionInFilter(session.status, filter, isAdmin)),
+    [sessionCards, filter, isAdmin]
+  );
+  const groupedCards = useMemo(() => groupSessionsByMonth(filteredCards), [filteredCards]);
+  const selectedSession = useMemo(() => (joinState.sessionId ? sessionCardsById.get(joinState.sessionId) ?? null : null), [joinState.sessionId, sessionCardsById]);
 
   const refreshSessions = async (token: string) => {
     const sessionsResponse = await listSessions(token);
@@ -459,25 +304,22 @@ export default function SessionsClient() {
     setMounted(true);
     const params = new URLSearchParams(window.location.search);
     const { token, shouldCleanUrl } = readTokenFromLocation(params);
-
     if (!token) {
       setGateState("denied");
-      router.replace("/denied");
+      router.replace("/access-denied");
       return;
     }
-
-    if (shouldCleanUrl) {
-      router.replace("/sessions");
-    }
+    if (shouldCleanUrl) router.replace("/sessions");
 
     validateClubToken(token)
       .then(async (valid) => {
         if (!valid) {
           clearStoredToken();
           setGateState("denied");
-          router.replace("/denied");
+          router.replace("/access-denied");
           return;
         }
+
         setGateState("allowed");
         const adminResponse = await fetch("/api/admin-session").catch(() => null);
         let isAdminUser = false;
@@ -492,27 +334,23 @@ export default function SessionsClient() {
         const [sessionsResponse, playersResponse, adminPlayersResponse] = await Promise.all([
           listSessions(token),
           listPlayers(token),
-          isAdminUser
-            ? fetch("/api/admin/players", { credentials: "include" })
-                .then((response) => response.json())
-                .catch(() => null)
-            : Promise.resolve(null)
+          isAdminUser ? fetch("/api/admin/players", { credentials: "include" }).then((response) => response.json()).catch(() => null) : Promise.resolve(null)
         ]);
+
         if (sessionsResponse?.ok) {
           setSessions((sessionsResponse.sessions ?? []).map((session) => ({ ...session, guest_count: normalizeGuestCount(session.guest_count) })));
           setCourts(sessionsResponse.courts ?? []);
           setParticipants(sessionsResponse.participants ?? []);
         }
-        if (playersResponse?.ok) {
-          setPlayers(playersResponse.players ?? []);
-        }
+        if (playersResponse?.ok) setPlayers(playersResponse.players ?? []);
+
         if (isAdminUser) {
-          const adminPlayersPayload = adminPlayersResponse as
+          const payload = adminPlayersResponse as
             | { ok?: boolean; players?: Array<{ id?: string; name?: string; active?: boolean; is_default_payer?: boolean }> }
             | null;
-          if (adminPlayersPayload?.ok && Array.isArray(adminPlayersPayload.players)) {
+          if (payload?.ok && Array.isArray(payload.players)) {
             setAdminPlayers(
-              adminPlayersPayload.players
+              payload.players
                 .filter((player) => typeof player?.id === "string" && typeof player?.name === "string")
                 .map((player) => ({
                   id: player.id as string,
@@ -532,7 +370,7 @@ export default function SessionsClient() {
       .catch(() => {
         clearStoredToken();
         setGateState("denied");
-        router.replace("/denied");
+        router.replace("/access-denied");
       });
   }, [router]);
 
@@ -541,24 +379,13 @@ export default function SessionsClient() {
     const body = document.body;
     const previousOverflow = body.style.overflow;
     const previousOverscrollBehavior = body.style.overscrollBehavior;
-
     body.style.overflow = "hidden";
     body.style.overscrollBehavior = "contain";
-
     return () => {
       body.style.overflow = previousOverflow;
       body.style.overscrollBehavior = previousOverscrollBehavior;
     };
   }, [joinState.open]);
-
-  useEffect(() => {
-    if (gateState !== "allowed" || loading) {
-      setEntranceReady(false);
-      return;
-    }
-    const timeout = window.setTimeout(() => setEntranceReady(true), 60);
-    return () => window.clearTimeout(timeout);
-  }, [gateState, loading]);
 
   const openJoinDialog = (sessionId: string) => {
     setActionMessage(null);
@@ -580,29 +407,6 @@ export default function SessionsClient() {
     });
   };
 
-  const deleteSessionDevOnly = async (sessionId: string) => {
-    if (!showDevDelete) return;
-    setActionMessage(null);
-    const confirmed = window.confirm("Delete this session? This cannot be undone.");
-    if (!confirmed) return;
-
-    const response = await fetch(`/api/admin/sessions/${sessionId}`, {
-      method: "DELETE",
-      credentials: "include"
-    });
-    const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    if (!data?.ok) {
-      setActionMessage(data?.error ?? "Failed to delete session.");
-      return;
-    }
-
-    const token = localStorage.getItem(getClubTokenStorageKey());
-    if (token) {
-      await refreshSessions(token);
-    }
-    setActionMessage("Session deleted.");
-  };
-
   const closeJoinDialog = () => {
     setJoinDialogError(null);
     setGuestCount(0);
@@ -614,9 +418,7 @@ export default function SessionsClient() {
   const togglePlayer = (id: string) => {
     setJoinState((prev) => {
       const exists = prev.selectedPlayerIds.includes(id);
-      const selectedPlayerIds = exists
-        ? prev.selectedPlayerIds.filter((playerId) => playerId !== id)
-        : [...prev.selectedPlayerIds, id];
+      const selectedPlayerIds = exists ? prev.selectedPlayerIds.filter((playerId) => playerId !== id) : [...prev.selectedPlayerIds, id];
       return { ...prev, selectedPlayerIds };
     });
   };
@@ -633,6 +435,7 @@ export default function SessionsClient() {
   const handleSubmitParticipants = async () => {
     const token = localStorage.getItem(getClubTokenStorageKey());
     if (!token || !joinState.sessionId) return;
+
     setJoinDialogError(null);
     const toJoin = joinState.selectedPlayerIds.filter((id) => !joinState.joinedPlayerIds.includes(id));
     const toWithdraw = joinState.joinedPlayerIds.filter((id) => !joinState.selectedPlayerIds.includes(id));
@@ -647,10 +450,7 @@ export default function SessionsClient() {
     setJoinState((prev) => ({ ...prev, isSubmitting: true }));
 
     if (toJoin.length > 0) {
-      const joinResult = await joinSession(token, {
-        sessionId: joinState.sessionId,
-        playerIds: toJoin
-      });
+      const joinResult = await joinSession(token, { sessionId: joinState.sessionId, playerIds: toJoin });
       if (!joinResult.ok) {
         setJoinState((prev) => ({ ...prev, isSubmitting: false }));
         setJoinDialogError(joinResult.error ?? "Join failed.");
@@ -659,10 +459,7 @@ export default function SessionsClient() {
     }
 
     if (toWithdraw.length > 0) {
-      const withdrawResult = await withdrawSession(token, {
-        sessionId: joinState.sessionId,
-        playerIds: toWithdraw
-      });
+      const withdrawResult = await withdrawSession(token, { sessionId: joinState.sessionId, playerIds: toWithdraw });
       if (!withdrawResult.ok) {
         setJoinState((prev) => ({ ...prev, isSubmitting: false }));
         setJoinDialogError(withdrawResult.error ?? "Withdraw failed.");
@@ -671,19 +468,14 @@ export default function SessionsClient() {
     }
 
     if (guestChanged) {
-      const guestResult = await setSessionGuests(token, {
-        sessionId: joinState.sessionId,
-        guestCount
-      });
+      const guestResult = await setSessionGuests(token, { sessionId: joinState.sessionId, guestCount });
       if (!guestResult.ok) {
         setJoinState((prev) => ({ ...prev, isSubmitting: false }));
         setJoinDialogError(guestResult.detail ?? guestResult.error ?? "Guest update failed.");
         return;
       }
       setSessions((prev) =>
-        prev.map((session) =>
-          session.id === joinState.sessionId ? { ...session, guest_count: normalizeGuestCount(guestResult.guestCount) } : session
-        )
+        prev.map((session) => (session.id === joinState.sessionId ? { ...session, guest_count: normalizeGuestCount(guestResult.guestCount) } : session))
       );
     }
 
@@ -694,19 +486,16 @@ export default function SessionsClient() {
         session_id: joinState.sessionId as string,
         player: { id: player.id, name: player.name, avatar_url: player.avatar_url ?? null }
       }));
-    setParticipants((prev) => [
-      ...prev.filter((entry) => entry.session_id !== joinState.sessionId),
-      ...selectedParticipantRows
-    ]);
+    setParticipants((prev) => [...prev.filter((entry) => entry.session_id !== joinState.sessionId), ...selectedParticipantRows]);
 
     const refreshed = await refreshSessions(token);
     setJoinState((prev) => ({ ...prev, isSubmitting: false }));
     closeJoinDialog();
-    if (toJoin.length === 0 && toWithdraw.length === 0 && guestChanged) {
-      setActionMessage(refreshed ? "Guests updated." : "Guests updated. Refresh failed.");
-      return;
-    }
-    setActionMessage(refreshed ? "Participants updated." : "Participants updated. Refresh failed.");
+    if (toJoin.length === 0 && toWithdraw.length === 0 && guestChanged) setActionMessage(refreshed ? "Guests updated." : "Guests updated. Refresh failed.");
+    else setActionMessage(refreshed ? "Participants updated." : "Participants updated. Refresh failed.");
+
+    setConfettiOrigin({ x: 0.5, y: 0.7 });
+    setConfettiTrigger((prev) => prev + 1);
   };
 
   const openCreateDialog = () => {
@@ -733,44 +522,36 @@ export default function SessionsClient() {
       location: session.location ?? "",
       total_fee: session.total_fee?.toString() ?? "",
       remarks: session.remarks ?? "",
-      payer_player_id:
-        typeof session.payer_player_id === "string" && session.payer_player_id.trim()
-          ? session.payer_player_id
-          : USE_DEFAULT_PAYER_VALUE,
+      payer_player_id: typeof session.payer_player_id === "string" && session.payer_player_id.trim() ? session.payer_player_id : USE_DEFAULT_PAYER_VALUE,
       status: session.status,
       courts: courtRows,
       isSubmitting: false
     });
   };
 
-  const closeSessionDialog = () => {
-    setFormState((prev) => ({ ...prev, open: false }));
+  const deleteSessionDevOnly = async (sessionId: string) => {
+    if (!showDevDelete) return;
+    setActionMessage(null);
+    const confirmed = window.confirm("Delete this session? This cannot be undone.");
+    if (!confirmed) return;
+    const response = await fetch(`/api/admin/sessions/${sessionId}`, { method: "DELETE", credentials: "include" });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!data?.ok) {
+      setActionMessage(data?.error ?? "Failed to delete session.");
+      return;
+    }
+    const token = localStorage.getItem(getClubTokenStorageKey());
+    if (token) await refreshSessions(token);
+    setActionMessage("Session deleted.");
   };
 
-  const updateFormField = (field: keyof SessionFormState, value: string) => {
-    setFormState((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const addCourtRow = () => {
-    setFormState((prev) => ({
-      ...prev,
-      courts: [
-        ...prev.courts,
-        { id: `court-${prev.courts.length}`, court_label: "", start_time: "", end_time: "" }
-      ]
-    }));
-  };
-
-  const updateCourtRow = (index: number, key: "court_label" | "start_time" | "end_time", value: string) => {
-    setFormState((prev) => ({
-      ...prev,
-      courts: prev.courts.map((court, idx) => (idx === index ? { ...court, [key]: value } : court))
-    }));
-  };
-
-  const removeCourtRow = (index: number) => {
-    setFormState((prev) => ({ ...prev, courts: prev.courts.filter((_, idx) => idx !== index) }));
-  };
+  const closeSessionDialog = () => setFormState((prev) => ({ ...prev, open: false }));
+  const updateFormField = (field: keyof SessionFormState, value: string) => setFormState((prev) => ({ ...prev, [field]: value }));
+  const addCourtRow = () =>
+    setFormState((prev) => ({ ...prev, courts: [...prev.courts, { id: `court-${prev.courts.length}`, court_label: "", start_time: "", end_time: "" }] }));
+  const updateCourtRow = (index: number, key: "court_label" | "start_time" | "end_time", value: string) =>
+    setFormState((prev) => ({ ...prev, courts: prev.courts.map((court, idx) => (idx === index ? { ...court, [key]: value } : court)) }));
+  const removeCourtRow = (index: number) => setFormState((prev) => ({ ...prev, courts: prev.courts.filter((_, idx) => idx !== index) }));
 
   const submitSessionForm = async () => {
     if (!formState.session_date) {
@@ -778,11 +559,11 @@ export default function SessionsClient() {
       return;
     }
     const allTimes = [formState.start_time, formState.end_time, ...formState.courts.map((court) => court.start_time), ...formState.courts.map((court) => court.end_time)].filter(Boolean);
-    const hasInvalidTime = allTimes.some((time) => !isQuarterHourTime(time));
-    if (hasInvalidTime) {
+    if (allTimes.some((time) => !isQuarterHourTime(time))) {
       setFormMessage("Use 15-minute time blocks only (00, 15, 30, 45).");
       return;
     }
+
     setFormState((prev) => ({ ...prev, isSubmitting: true }));
     const payload = {
       session_date: formState.session_date,
@@ -799,9 +580,7 @@ export default function SessionsClient() {
         end_time: combineDateAndTimeToIso(formState.session_date, court.end_time)
       }))
     };
-
-    const endpoint =
-      formState.mode === "create" ? "/api/admin/sessions" : `/api/admin/sessions/${formState.sessionId}`;
+    const endpoint = formState.mode === "create" ? "/api/admin/sessions" : `/api/admin/sessions/${formState.sessionId}`;
     const method = formState.mode === "create" ? "POST" : "PATCH";
     const response = await fetch(endpoint, {
       method,
@@ -816,707 +595,281 @@ export default function SessionsClient() {
       return;
     }
     const token = localStorage.getItem(getClubTokenStorageKey());
-    if (token) {
-      await refreshSessions(token);
-    }
+    if (token) await refreshSessions(token);
     setFormMessage("Session saved.");
     setFormState((prev) => ({ ...prev, isSubmitting: false, open: false }));
   };
 
   if (gateState !== "allowed") {
-    return <main />;
+    return (
+      <div className="v2-page">
+        <AnimatedBackground />
+        <main className="v2-container" />
+      </div>
+    );
   }
 
   if (!mounted || loading) {
     return (
-      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
-        <header className="flex flex-col gap-4 sm:gap-6">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-500">Club Genie</p>
-            <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Upcoming Sessions</h1>
-            <p className="mt-2 text-slate-500 dark:text-slate-300">Loading sessions...</p>
-          </div>
-        </header>
-        <div className="mt-6 flex flex-wrap items-center gap-2 animate-pulse">
-          <div className="h-10 w-36 rounded-full bg-slate-200/70 dark:bg-ink-700/60" />
-          <div className="h-10 w-24 rounded-full bg-slate-200/70 dark:bg-ink-700/60" />
-          <div className="h-10 w-24 rounded-full bg-slate-200/70 dark:bg-ink-700/60" />
-        </div>
-        <section className="mt-8 space-y-4">
-          {Array.from({ length: 2 }).map((_, idx) => (
-            <div key={`skeleton-${idx}`} className="card animate-pulse">
-              <div className="h-7 w-48 rounded-lg bg-slate-200/70 dark:bg-ink-700/60" />
-              <div className="mt-3 h-5 w-44 rounded-lg bg-slate-200/70 dark:bg-ink-700/60" />
-              <div className="mt-2 h-5 w-24 rounded-lg bg-slate-200/70 dark:bg-ink-700/60" />
-              <div className="mt-6 h-10 w-40 rounded-full bg-slate-200/70 dark:bg-ink-700/60" />
+      <div className="v2-page">
+        <AnimatedBackground />
+        <main className="v2-container">
+          <header className="v2-header !px-0 pt-6">
+            <div className="v2-logo">
+              <Sparkles className="mr-2 inline-block text-[var(--v2-primary)]" size={22} />
+              <span>Club</span>
+              <span className="v2-logo-accent">Genie</span>
             </div>
-          ))}
-        </section>
-      </main>
+          </header>
+          <div className="mb-6">
+            <h1 className="text-4xl font-bold md:text-5xl">
+              Upcoming <span className="text-[var(--v2-primary)]">Sessions</span>
+            </h1>
+            <p className="mt-2 text-sm text-[var(--v2-text-secondary)]">Loading sessions...</p>
+          </div>
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <SkeletonCard key={i} index={i} />
+            ))}
+          </div>
+        </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
-      <header className="flex flex-col gap-4 sm:gap-6">
-        {isAdmin ? <AdminNavbar currentPath="/sessions" /> : null}
-        <div className="flex flex-wrap items-start justify-between gap-4 sm:gap-6">
-          <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-500">Club Genie</p>
-            <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Upcoming Sessions</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          {isAdmin ? (
-            <button
-              type="button"
-              onClick={openCreateDialog}
-              className="tap-feedback tap-feedback-strong btn-ripple rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm hover:-translate-y-0.5 hover:shadow-md"
-            >
-              Create Session
-            </button>
-          ) : null}
-        </div>
-        </div>
-      </header>
+    <div className="v2-page">
+      <AnimatedBackground />
+      <Confetti trigger={confettiTrigger} originX={confettiOrigin.x} originY={confettiOrigin.y} />
 
-      <div
-        className={`mt-6 flex flex-wrap items-center justify-between gap-3 transition-all duration-700 ease-out ${
-          entranceReady ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0"
-        }`}
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-full border border-slate-200 p-1 dark:border-ink-700/60">
+      <main className="v2-container">
+        <header className="v2-header !px-0 pt-6">
+          <div className="flex w-full flex-col gap-4">
+            {isAdmin ? <AdminNavbar currentPath="/sessions" className="v2-admin-nav" /> : null}
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="v2-logo">
+                <Sparkles className="mr-2 inline-block text-[var(--v2-primary)]" size={22} />
+                <span>Club</span>
+                <span className="v2-logo-accent">Genie</span>
+              </div>
+              {isAdmin ? (
+                <button type="button" className="v2-dialog-btn v2-dialog-btn-primary" onClick={openCreateDialog}>
+                  Create Session
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </header>
+
+        <section className="mb-8">
+          <h1 className="text-4xl font-bold md:text-5xl">
+            {filter === "upcoming" ? "Upcoming" : "Past"} <span className="text-[var(--v2-primary)]">Sessions</span>
+          </h1>
+          {actionMessage ? <p className="v2-inline-message mt-3">{actionMessage}</p> : null}
+        </section>
+
+        <section className="mb-8 flex items-center">
+          <div className="relative flex items-center rounded-full border border-[var(--v2-border)] bg-[var(--v2-bg-card)] p-1">
+            <div
+              className="absolute h-[calc(100%-8px)] w-24 rounded-full bg-[var(--v2-primary)] transition-transform duration-300"
+              style={{ transform: filter === "upcoming" ? "translateX(0px)" : "translateX(96px)" }}
+            />
             <button
-              type="button"
-              onClick={() => setShowPastSessions(false)}
-              className={`tap-feedback rounded-full px-4 py-2 text-sm font-semibold ${
-                !showPastSessions
-                  ? "bg-emerald-500 text-slate-900"
-                  : "text-slate-700 dark:text-slate-100"
+              className={`relative z-10 w-24 rounded-full px-4 py-2 text-sm font-semibold ${
+                filter === "upcoming" ? "text-[var(--v2-bg-deep)]" : "text-[var(--v2-text-secondary)]"
               }`}
+              onClick={() => setFilter("upcoming")}
             >
               Upcoming
             </button>
             <button
-              type="button"
-              onClick={() => setShowPastSessions(true)}
-              className={`tap-feedback rounded-full px-4 py-2 text-sm font-semibold ${
-                showPastSessions
-                  ? "bg-emerald-500 text-slate-900"
-                  : "text-slate-700 dark:text-slate-100"
+              className={`relative z-10 w-24 rounded-full px-4 py-2 text-sm font-semibold ${
+                filter === "past" ? "text-[var(--v2-bg-deep)]" : "text-[var(--v2-text-secondary)]"
               }`}
+              onClick={() => setFilter("past")}
             >
               Past
             </button>
           </div>
-          <button
-            type="button"
-            onClick={() => toggleSort("session_date")}
-            className={`tap-feedback rounded-full border px-4 py-2 text-sm font-semibold ${
-              sortKey === "session_date"
-                ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
-                : "border-slate-200 text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
-            }`}
-          >
-            Date {sortKey === "session_date" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleSort("status")}
-            className={`tap-feedback rounded-full border px-4 py-2 text-sm font-semibold ${
-              sortKey === "status"
-                ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
-                : "border-slate-200 text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
-            }`}
-          >
-            Status {sortKey === "status" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
-          </button>
-        </div>
-        {actionMessage ? <p className="text-sm text-slate-500 dark:text-slate-300">{actionMessage}</p> : null}
-      </div>
-
-      {displayedSessions.length === 0 ? (
-        <section className="card mt-10">
-          <p>{showPastSessions ? "No past sessions available." : "No upcoming sessions available."}</p>
         </section>
-      ) : (
-        <section className="mt-8 sm:mt-10">
-          <div className="space-y-4 md:hidden">
-            {displayedSessions.map((session, index) => {
-              const courtItems = courtsBySession[session.id] ?? [];
-              const participantItems = participantsBySession[session.id] ?? [];
-              const participantNames = getParticipantNames(participantItems);
-              const guestCountForSession = normalizeGuestCount(session.guest_count);
-              const hasParticipants = participantNames.length > 0 || guestCountForSession > 0;
-              const participantsExpanded = Boolean(expandedParticipantNames[session.id]);
-              const participantListId = `participant-names-${session.id}`;
-              return (
-                <article
-                  key={session.id}
-                  className={`card p-4 transition-all duration-700 ease-out ${
-                    entranceReady ? "translate-x-0 opacity-100" : "translate-x-8 opacity-0"
-                  }`}
-                  style={{ transitionDelay: `${Math.min(120 + index * 90, 700)}ms` }}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-semibold">{formatDate(session.session_date)}</div>
-                    <div className="flex flex-col items-end gap-2">
-                      <span
-                        className={`pill ${
-                          session.status === "OPEN"
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
-                            : session.status === "CLOSED"
-                            ? "bg-slate-200 text-slate-600 dark:bg-ink-700 dark:text-slate-200"
-                            : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
-                        } ${session.status === "OPEN" ? "neon-open-badge" : ""}`}
-                        style={session.status === "OPEN" ? getOpenBadgeMotionVars(session.id) : undefined}
-                      >
-                        {session.status}
-                      </span>
-                      {isAdmin && session.status === "CLOSED" ? (
-                        <span
-                          className={`pill ${
-                            session.splitwise_status === "CREATED"
-                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
-                              : session.splitwise_status === "FAILED"
-                              ? "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200"
-                              : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
-                          }`}
-                        >
-                          Splitwise {session.splitwise_status ?? "PENDING"}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <p className="mt-2 flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-300">
-                    <Clock3 size={14} className="text-emerald-400 dark:text-emerald-300" />
-                    <span>{formatSessionTimeRangeMobile(session.start_time, session.end_time)}</span>
-                  </p>
-                  <p className="mt-1 flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-300">
-                    <MapPin size={14} className="text-emerald-400 dark:text-emerald-300" />
-                    <span>{formatSessionLocationForDisplay(session.location)}</span>
-                  </p>
-                  {session.remarks ? <p className="mt-2 text-xs text-slate-500">{session.remarks}</p> : null}
-                  <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
-                    <p className="flex items-center gap-2.5 font-semibold">
-                      <LayoutGrid size={14} className="text-emerald-400 dark:text-emerald-300" />
-                      <span>Courts:</span>
-                    </p>
-                    {courtItems.length === 0 ? (
-                      <p className="mt-1 ml-6">TBD</p>
-                    ) : (
-                      <ul className="mt-1 ml-6 space-y-1">
-                        {courtItems.map((court) => (
-                          <li key={court.id}>
-                            {formatCourtLabelForDisplay(court.court_label)} ({formatCourtTimeRangeForDisplay(court.start_time, court.end_time)})
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                  <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
-                    {hasParticipants ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => toggleParticipantsExpanded(session.id)}
-                          className="tap-feedback flex w-full items-center gap-2.5 text-left"
-                          aria-expanded={participantsExpanded}
-                          aria-controls={participantListId}
-                        >
-                          <Users2 size={14} className="text-emerald-400 dark:text-emerald-300" />
-                          <ParticipantAvatarGrid participants={participantItems} guestCount={guestCountForSession} />
-                        </button>
-                        <p className="ml-6 mt-1 text-xs text-slate-500 dark:text-slate-300">
-                          {participantNames.length} players joined
-                          {guestCountForSession > 0 ? ` · Guests x${guestCountForSession}` : ""}
-                        </p>
-                        {participantsExpanded ? (
-                          <p id={participantListId} className="ml-6 mt-2 text-slate-500 dark:text-slate-300">
-                            {participantNames.length > 0 ? participantNames.join(", ") : "-"}
-                            {guestCountForSession > 0 ? ` · Guests x${guestCountForSession}` : ""}
-                          </p>
-                        ) : null}
-                      </>
-                    ) : (
-                      <div className="flex items-center gap-2.5">
-                        <Users2 size={14} className="text-emerald-400 dark:text-emerald-300" />
-                        <span>Open</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="mt-4 flex items-center justify-between gap-3">
-                    <span className="inline-flex items-center text-sm font-normal text-slate-400 dark:text-slate-400">
-                      {session.total_fee ? `$${session.total_fee.toFixed(2)}` : "-"}
-                    </span>
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <button
-                        type="button"
-                        className="tap-feedback tap-feedback-strong btn-ripple min-h-11 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:-translate-y-0.5 hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-                        onClick={() => openJoinDialog(session.id)}
-                        disabled={session.status === "CLOSED"}
-                      >
-                        Join / Withdraw
-                      </button>
-                      {isAdmin ? (
-                        <button
-                          type="button"
-                          className="tap-feedback min-h-11 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:-translate-y-0.5 hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-                          onClick={() => openEditDialog(session)}
-                        >
-                          Edit
-                        </button>
-                      ) : null}
-                      {showDevDelete ? (
-                        <button
-                          type="button"
-                          className="tap-feedback min-h-11 rounded-full border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:-translate-y-0.5 hover:border-rose-300 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
-                          onClick={() => deleteSessionDevOnly(session.id)}
-                        >
-                          Delete
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
 
-          <div className="hidden overflow-hidden rounded-3xl border border-slate-200/80 bg-white/90 shadow-sm dark:border-ink-700/60 dark:bg-ink-800/80 md:block">
-            <div className="grid grid-cols-[0.95fr_0.8fr_1.05fr_1.45fr_2.4fr_0.6fr_1.1fr] gap-4 border-b border-slate-200/60 bg-slate-100/70 px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-ink-700/60 dark:bg-ink-900/40 dark:text-slate-300">
-              <button type="button" onClick={() => toggleSort("session_date")} className="inline-flex items-center gap-2 text-left">
-                <CalendarDays size={13} className="text-emerald-400 dark:text-emerald-300" />
-                Date
-                <ArrowUpDown size={12} />
-              </button>
-              <span className="inline-flex items-center gap-2">
-                <Clock3 size={13} className="text-emerald-400 dark:text-emerald-300" />
-                Time
-              </span>
-              <span className="inline-flex items-center gap-2">
-                <MapPin size={13} className="text-emerald-400 dark:text-emerald-300" />
-                Location
-              </span>
-              <span className="inline-flex items-center gap-2">
-                <LayoutGrid size={13} className="text-emerald-400 dark:text-emerald-300" />
-                Courts
-              </span>
-              <span className="inline-flex items-center gap-2">
-                <Users2 size={13} className="text-emerald-400 dark:text-emerald-300" />
-                Participants
-              </span>
-              <span className="inline-flex items-center gap-2">
-                <DollarSign size={13} className="text-emerald-400 dark:text-emerald-300" />
-                Fee
-              </span>
-              <button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center gap-2 text-left">
-                <Rows3 size={13} className="text-emerald-400 dark:text-emerald-300" />
-                Status
-                <ArrowUpDown size={12} />
-              </button>
-            </div>
-            <div className="divide-y divide-slate-200/70 dark:divide-ink-700/60">
-              {displayedSessions.map((session, index) => {
-                const courtItems = courtsBySession[session.id] ?? [];
-                const participantItems = participantsBySession[session.id] ?? [];
-                const participantNames = getParticipantNames(participantItems);
-                const guestCountForSession = normalizeGuestCount(session.guest_count);
-                const hasParticipants = participantNames.length > 0 || guestCountForSession > 0;
-                const participantsExpanded = Boolean(expandedParticipantNames[session.id]);
-                const participantListId = `participant-names-desktop-${session.id}`;
-                const sessionTimeLines = formatSessionTimeRangeDesktopLines(session.start_time, session.end_time);
-                return (
-                  <div
-                    key={session.id}
-                    className={`grid grid-cols-[0.95fr_0.8fr_1.05fr_1.45fr_2.4fr_0.6fr_1.1fr] items-start gap-4 px-6 py-5 text-sm transition-all duration-700 ease-out ${
-                      entranceReady ? "translate-x-0 opacity-100" : "translate-x-8 opacity-0"
-                    }`}
-                    style={{ transitionDelay: `${Math.min(120 + index * 70, 600)}ms` }}
-                  >
-                    <div className="font-semibold">{formatDate(session.session_date)}</div>
-                    <div className="text-slate-600 dark:text-slate-300">
-                      <p>{sessionTimeLines.line1}</p>
-                      {sessionTimeLines.line2 ? <p>{sessionTimeLines.line2}</p> : null}
-                    </div>
-                    <div className="text-slate-600 dark:text-slate-300">
-                      <div>{formatSessionLocationForDisplay(session.location)}</div>
-                      {session.remarks ? <div className="mt-2 text-xs">{session.remarks}</div> : null}
-                    </div>
-                    <div className="text-slate-600 dark:text-slate-300">
-                      <p className="font-semibold">Courts:</p>
-                      {courtItems.length === 0 ? (
-                        <p className="mt-1">TBD</p>
-                      ) : (
-                        <ul className="mt-1 space-y-1">
-                          {courtItems.map((court) => (
-                            <li key={court.id}>
-                              {formatCourtLabelForDisplay(court.court_label)} ({formatCourtTimeRangeForDisplay(court.start_time, court.end_time)})
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                    <div className="text-slate-600 dark:text-slate-300">
-                      {hasParticipants ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => toggleParticipantsExpanded(session.id)}
-                            className="tap-feedback flex w-full items-center gap-2 text-left"
-                            aria-expanded={participantsExpanded}
-                            aria-controls={participantListId}
-                          >
-                            <ParticipantAvatarGrid participants={participantItems} guestCount={guestCountForSession} />
-                          </button>
-                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
-                            {participantNames.length} players joined
-                            {guestCountForSession > 0 ? ` · Guests x${guestCountForSession}` : ""}
-                          </p>
-                          {participantsExpanded ? (
-                            <p id={participantListId} className="mt-2 text-slate-500 dark:text-slate-300">
-                              {participantNames.length > 0 ? participantNames.join(", ") : "-"}
-                              {guestCountForSession > 0 ? ` · Guests x${guestCountForSession}` : ""}
-                            </p>
-                          ) : null}
-                        </>
-                      ) : (
-                        <span>Open</span>
-                      )}
-                      <div className="mt-2">
-                        <button
-                          type="button"
-                          className="tap-feedback tap-feedback-strong btn-ripple rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:-translate-y-0.5 hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-                          onClick={() => openJoinDialog(session.id)}
-                          disabled={session.status === "CLOSED"}
-                        >
-                          Join / Withdraw
-                        </button>
-                      </div>
-                    </div>
-                    <div className="text-slate-600 dark:text-slate-300">
-                      {session.total_fee ? `$${session.total_fee.toFixed(2)}` : "-"}
-                    </div>
-                    <div className="flex items-center">
-                      <div className="flex flex-col items-start gap-2">
-                        <span
-                          className={`pill ${
-                            session.status === "OPEN"
-                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
-                              : session.status === "CLOSED"
-                              ? "bg-slate-200 text-slate-600 dark:bg-ink-700 dark:text-slate-200"
-                              : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
-                          } ${session.status === "OPEN" ? "neon-open-badge" : ""}`}
-                          style={session.status === "OPEN" ? getOpenBadgeMotionVars(session.id) : undefined}
-                        >
-                          {session.status}
-                        </span>
-                        {isAdmin && session.status === "CLOSED" ? (
-                          <span
-                            className={`pill ${
-                              session.splitwise_status === "CREATED"
-                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
-                                : session.splitwise_status === "FAILED"
-                                ? "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200"
-                                : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
-                            }`}
-                          >
-                            Splitwise {session.splitwise_status ?? "PENDING"}
-                          </span>
-                        ) : null}
-                        {(isAdmin || showDevDelete) && (
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {isAdmin ? (
-                              <button
-                                type="button"
-                                className="tap-feedback rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:-translate-y-0.5 hover:border-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-                                onClick={() => openEditDialog(session)}
-                              >
-                                Edit
-                              </button>
-                            ) : null}
-                            {showDevDelete ? (
-                              <button
-                                type="button"
-                                className="tap-feedback rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 hover:-translate-y-0.5 hover:border-rose-300 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
-                                onClick={() => deleteSessionDevOnly(session.id)}
-                              >
-                                Delete
-                              </button>
-                            ) : null}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+        {groupedCards.length === 0 ? (
+          <div className="v2-card py-14 text-center">
+            <h3 className="mb-2 text-xl font-semibold">No sessions found</h3>
+            <p className="text-[var(--v2-text-secondary)]">Try switching tabs or check back later.</p>
           </div>
-        </section>
-      )}
-
-      {joinState.open ? (
-        <section className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-3 py-3 sm:px-6">
-          <div className="card w-full max-w-2xl max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain p-4 sm:max-h-[calc(100dvh-3rem)] sm:p-6">
-            <div className="flex items-start justify-between">
-              <div>
-                <h2 className="text-2xl font-semibold">Select players</h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
-                  Choose one or more players to join or withdraw.
-                </p>
+        ) : (
+          groupedCards.map(({ month, sessions: monthSessions }) => (
+            <section key={month} className="mb-8">
+              <h2 className="v2-section-title mb-4">{month}</h2>
+              <div className="space-y-4">
+                {monthSessions.map((session, index) => {
+                  const source = sessionSummaryById.get(session.id) ?? null;
+                  return (
+                    <SessionCard
+                      key={session.id}
+                      session={{ ...session, participantCount: session.participants.length, guestCount: normalizeGuestCount(session.guestCount) }}
+                      index={index}
+                      onJoinWithdraw={() => openJoinDialog(session.id)}
+                      showAdminActions={isAdmin}
+                      showSplitwiseStatus={isAdmin}
+                      showDeleteAction={showDevDelete}
+                      onEdit={source ? () => openEditDialog(source) : undefined}
+                      onDelete={showDevDelete ? () => deleteSessionDevOnly(session.id) : undefined}
+                    />
+                  );
+                })}
               </div>
-              <button
-                type="button"
-                onClick={closeJoinDialog}
-                className="tap-feedback rounded-full border border-slate-200 px-3 py-1 text-sm font-semibold text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
-              >
-                Close
-              </button>
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
-              {players.length === 0 ? <p className="col-span-3">No players available.</p> : null}
-              {players.map((player) => {
-                const statusText = getPlayerSelectionStatus(player.id, joinState.selectedPlayerIds, joinState.joinedPlayerIds);
-                return (
-                  <button
-                    type="button"
-                    key={player.id}
-                    onClick={() => togglePlayer(player.id)}
-                    className={`tap-feedback min-h-[112px] rounded-2xl border px-2 py-2 text-sm transition sm:min-h-[132px] sm:px-3 sm:py-3 ${
-                      joinState.selectedPlayerIds.includes(player.id)
-                        ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/20 dark:text-emerald-200"
-                        : "border-slate-200/80 text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
-                    }`}
-                  >
-                    <span className="flex h-full w-full flex-col items-center justify-center gap-2 text-center">
-                      <PlayerAvatarCircle
-                        name={player.name}
-                        avatarUrl={player.avatar_url ?? null}
-                        sizeClass="h-12 w-12 text-sm sm:h-14 sm:w-14 sm:text-base"
-                      />
-                      <span className="max-w-full text-sm font-semibold leading-tight sm:text-base">{player.name}</span>
-                      <span className="text-[10px] font-semibold uppercase tracking-wide sm:text-xs">{statusText}</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            {joinDialogError ? <p className="mt-3 text-sm text-rose-400">{joinDialogError}</p> : null}
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={handleSubmitParticipants}
-                disabled={joinState.isSubmitting}
-                className="tap-feedback tap-feedback-strong btn-ripple rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:-translate-y-0.5 disabled:opacity-60"
-              >
-                {joinState.isSubmitting ? "Submitting..." : "Submit"}
-              </button>
-              <div className={`guest-morph-shell ${showGuestControl ? "expanded" : "collapsed"}`}>
-                <button
-                  type="button"
-                  onClick={() => setShowGuestControl(true)}
-                  className="guest-morph-add tap-feedback rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
-                  aria-hidden={showGuestControl}
-                  tabIndex={showGuestControl ? -1 : 0}
-                >
-                  Add Guests
-                </button>
-                <div className="guest-morph-controls">
-                  <button
-                    type="button"
-                    onClick={incrementGuests}
-                    disabled={guestCount >= MAX_GUEST_COUNT}
-                    className="tap-feedback inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-ink-700/60 dark:text-slate-100"
-                  >
-                    +
-                  </button>
-                  <span className="min-w-[88px] text-center text-sm font-semibold text-slate-700 dark:text-slate-100">
-                    {guestCount} Guest{guestCount === 1 ? "" : "s"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={decrementGuests}
-                    disabled={guestCount <= 0}
-                    className="tap-feedback inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-ink-700/60 dark:text-slate-100"
-                  >
-                    -
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
+            </section>
+          ))
+        )}
+      </main>
+
+      <PlayerSelectionDialog
+        isOpen={joinState.open}
+        onClose={closeJoinDialog}
+        session={selectedSession}
+        allPlayers={players.map((player) => ({ id: player.id, name: player.name, avatarUrl: player.avatar_url ?? null }))}
+        selectedPlayerIds={joinState.selectedPlayerIds}
+        onTogglePlayer={togglePlayer}
+        onSubmit={handleSubmitParticipants}
+        guestCount={guestCount}
+        showGuestControls={showGuestControl}
+        onShowGuestControls={() => setShowGuestControl(true)}
+        onIncrementGuest={incrementGuests}
+        onDecrementGuest={decrementGuests}
+        isSubmitting={joinState.isSubmitting}
+        errorMessage={joinDialogError}
+      />
 
       {formState.open ? (
-        <section className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-4 sm:px-6">
-          <div className="card max-h-full w-full max-w-2xl overflow-y-auto p-4 sm:p-6">
-            <div className="flex items-start justify-between">
+        <section className="v2-dialog-overlay" onClick={closeSessionDialog}>
+          <div className="v2-admin-dialog-content" onClick={(event) => event.stopPropagation()}>
+            <div className="v2-dialog-header">
               <div>
-                <h2 className="text-2xl font-semibold">
-                  {formState.mode === "create" ? "Create Session" : "Edit Session"}
-                </h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
-                  Fill in the session details and courts.
-                </p>
+                <h2 className="v2-dialog-title">{formState.mode === "create" ? "Create Session" : "Edit Session"}</h2>
+                <p className="v2-dialog-subtitle">Fill in session details and courts.</p>
               </div>
-              <button type="button" onClick={closeSessionDialog} className="text-sm text-slate-500">
-                Close
+              <button className="v2-dialog-close" onClick={closeSessionDialog}>
+                x
               </button>
             </div>
-            <div className="mt-4 grid gap-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="text-sm font-semibold">
-                  Session Date
-                  <input
-                    type="date"
-                    value={formState.session_date}
-                    onChange={(event) => updateFormField("session_date", event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-ink-700/60 dark:bg-ink-800"
-                  />
-                </label>
-                <label className="text-sm font-semibold">
-                  Status
-                  <select
-                    value={formState.status}
-                    onChange={(event) => updateFormField("status", event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-ink-700/60 dark:bg-ink-800"
-                  >
-                    <option value="OPEN">OPEN</option>
-                    <option value="DRAFT">DRAFT</option>
-                    <option value="CLOSED">CLOSED</option>
-                  </select>
-                </label>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="text-sm font-semibold">
-                  Start Time
-                  <QuarterTimeSelect
-                    value={formState.start_time}
-                    onChange={(value) => updateFormField("start_time", value)}
-                  />
-                </label>
-                <label className="text-sm font-semibold">
-                  End Time
-                  <QuarterTimeSelect
-                    value={formState.end_time}
-                    onChange={(value) => updateFormField("end_time", value)}
-                  />
-                </label>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="text-sm font-semibold">
-                  Location
-                  <input
-                    type="text"
-                    value={formState.location}
-                    onChange={(event) => updateFormField("location", event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-ink-700/60 dark:bg-ink-800"
-                  />
-                </label>
-                <label className="text-sm font-semibold">
-                  Total Fee
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formState.total_fee}
-                    onChange={(event) => updateFormField("total_fee", event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-ink-700/60 dark:bg-ink-800"
-                  />
-                </label>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="text-sm font-semibold">
-                  Remarks
-                  <input
-                    type="text"
-                    value={formState.remarks}
-                    onChange={(event) => updateFormField("remarks", event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-ink-700/60 dark:bg-ink-800"
-                  />
-                </label>
-                <label className="text-sm font-semibold">
-                  Payer
-                  <select
-                    value={formState.payer_player_id}
-                    onChange={(event) => updateFormField("payer_player_id", event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-ink-700/60 dark:bg-ink-800"
-                  >
-                    <option value={USE_DEFAULT_PAYER_VALUE}>
-                      Use default payer ({defaultPayer?.name ?? "not set"})
+
+            <div className="v2-admin-grid">
+              <label className="v2-admin-field">
+                Session Date
+                <input
+                  type="date"
+                  value={formState.session_date}
+                  onChange={(event) => updateFormField("session_date", event.target.value)}
+                  className="v2-admin-input"
+                />
+              </label>
+              <label className="v2-admin-field">
+                Status
+                <select
+                  value={formState.status}
+                  onChange={(event) => updateFormField("status", event.target.value)}
+                  className="v2-admin-select"
+                >
+                  <option value="OPEN">OPEN</option>
+                  <option value="DRAFT">DRAFT</option>
+                  <option value="CLOSED">CLOSED</option>
+                </select>
+              </label>
+              <label className="v2-admin-field">
+                Start Time
+                <QuarterTimeSelect value={formState.start_time} onChange={(value) => updateFormField("start_time", value)} />
+              </label>
+              <label className="v2-admin-field">
+                End Time
+                <QuarterTimeSelect value={formState.end_time} onChange={(value) => updateFormField("end_time", value)} />
+              </label>
+              <label className="v2-admin-field">
+                Location
+                <input
+                  type="text"
+                  value={formState.location}
+                  onChange={(event) => updateFormField("location", event.target.value)}
+                  className="v2-admin-input"
+                />
+              </label>
+              <label className="v2-admin-field">
+                Total Fee
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formState.total_fee}
+                  onChange={(event) => updateFormField("total_fee", event.target.value)}
+                  className="v2-admin-input"
+                />
+              </label>
+              <label className="v2-admin-field">
+                Remarks
+                <input
+                  type="text"
+                  value={formState.remarks}
+                  onChange={(event) => updateFormField("remarks", event.target.value)}
+                  className="v2-admin-input"
+                />
+              </label>
+              <label className="v2-admin-field">
+                Payer
+                <select
+                  value={formState.payer_player_id}
+                  onChange={(event) => updateFormField("payer_player_id", event.target.value)}
+                  className="v2-admin-select"
+                >
+                  <option value={USE_DEFAULT_PAYER_VALUE}>Use default payer ({defaultPayer?.name ?? "not set"})</option>
+                  {payerOptions.map((player) => (
+                    <option key={player.id} value={player.id}>
+                      {player.name}
+                      {player.active ? "" : " (inactive)"}
                     </option>
-                    {payerOptions.map((player) => (
-                      <option key={player.id} value={player.id}>
-                        {player.name}
-                        {player.active ? "" : " (inactive)"}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="mt-2 block text-xs text-slate-400">
-                    Default payer is applied and saved explicitly.
+                  ))}
+                </select>
+                <span className="v2-admin-help">Default payer is applied and saved explicitly.</span>
+                {adminPlayers.length === 0 && players.length > 0 ? (
+                  <span className="v2-admin-help v2-admin-help-warning">
+                    Loaded active-player fallback list (admin roster details unavailable).
                   </span>
-                  {adminPlayers.length === 0 && players.length > 0 ? (
-                    <span className="mt-1 block text-xs text-amber-400">
-                      Loaded active-player fallback list (admin roster details unavailable).
-                    </span>
-                  ) : null}
-                </label>
-              </div>
+                ) : null}
+              </label>
             </div>
 
             <div className="mt-6">
-              <div className="flex items-center justify-between">
+              <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Courts</h3>
-                <button
-                  type="button"
-                  onClick={addCourtRow}
-                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
-                >
+                <button type="button" className="v2-admin-chip" onClick={addCourtRow}>
                   Add Court
                 </button>
               </div>
-              <div className="mt-3 grid gap-3">
+              <div className="space-y-3">
                 {formState.courts.length === 0 ? (
-                  <div className="card-muted text-sm text-slate-500 dark:text-slate-300">
-                    No courts added yet.
-                  </div>
+                  <div className="v2-card-muted">No courts added yet.</div>
                 ) : (
                   formState.courts.map((court, index) => (
-                    <div
-                      key={court.id}
-                      className="grid gap-4 rounded-2xl border border-slate-200/80 p-4 dark:border-ink-700/60 md:grid-cols-2"
-                    >
-                      <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 md:col-span-2">
+                    <div key={court.id} className="v2-admin-court-card">
+                      <label className="v2-admin-field v2-admin-field-full">
                         Court
                         <input
                           type="text"
                           placeholder="Court label"
                           value={court.court_label}
                           onChange={(event) => updateCourtRow(index, "court_label", event.target.value)}
-                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-ink-700/60 dark:bg-ink-800 dark:text-slate-100 dark:placeholder:text-slate-500"
+                          className="v2-admin-input"
                         />
                       </label>
-                      <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <label className="v2-admin-field">
                         Start
-                        <QuarterTimeSelect
-                          value={court.start_time}
-                          onChange={(value) => updateCourtRow(index, "start_time", value)}
-                        />
+                        <QuarterTimeSelect value={court.start_time} onChange={(value) => updateCourtRow(index, "start_time", value)} />
                       </label>
-                      <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <label className="v2-admin-field">
                         End
-                        <QuarterTimeSelect
-                          value={court.end_time}
-                          onChange={(value) => updateCourtRow(index, "end_time", value)}
-                        />
+                        <QuarterTimeSelect value={court.end_time} onChange={(value) => updateCourtRow(index, "end_time", value)} />
                       </label>
-                      <div className="md:col-span-2">
-                        <button
-                          type="button"
-                          onClick={() => removeCourtRow(index)}
-                          className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
-                        >
+                      <div className="v2-admin-field v2-admin-field-full">
+                        <button type="button" className="v2-admin-chip v2-admin-chip-danger" onClick={() => removeCourtRow(index)}>
                           Remove
                         </button>
                       </div>
@@ -1526,28 +879,18 @@ export default function SessionsClient() {
               </div>
             </div>
 
-            {formMessage ? <p className="mt-4 text-sm text-slate-500">{formMessage}</p> : null}
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={submitSessionForm}
-                disabled={formState.isSubmitting}
-                className="tap-feedback tap-feedback-strong btn-ripple rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:-translate-y-0.5"
-              >
+            {formMessage ? <p className="v2-inline-message mt-4">{formMessage}</p> : null}
+            <div className="v2-admin-actions">
+              <button type="button" className="v2-dialog-btn v2-dialog-btn-primary" onClick={submitSessionForm} disabled={formState.isSubmitting}>
                 {formState.isSubmitting ? "Saving..." : "Save Session"}
               </button>
-              <button
-                type="button"
-                onClick={closeSessionDialog}
-                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
-              >
+              <button type="button" className="v2-admin-chip" onClick={closeSessionDialog}>
                 Cancel
               </button>
             </div>
           </div>
         </section>
       ) : null}
-
-    </main>
+    </div>
   );
 }

@@ -43,7 +43,8 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Admin can keep legacy Gmail OAuth config (`client_id`, `client_secret`, `refresh_token`) in Supabase for rollback only.
 - Admin can manage admin accounts (create/update/deactivate/reset password) and change own password.
 - Session closing cron creates Splitwise expenses and marks sessions CLOSED, idempotently.
-- Sessions display participants as avatar circles by default; tapping toggles participant names.
+- Sessions display participants as avatar circles only (including guest indicator when guests are added); participant names are not expanded on card tap.
+- Sessions page tabs use `Upcoming` and `Past` filters: public users see `OPEN/FULL` in Upcoming and `CLOSED` in Past; admin users also see `DRAFT` sessions in Past for fix workflows.
 - Join/Withdraw player picker shows avatar + name rows.
 - Session cards show participant count as "`x players joined`", and include guest indicator when guests are added.
 - Sessions page location display removes a leading `Club` prefix for readability (display-only; stored value unchanged).

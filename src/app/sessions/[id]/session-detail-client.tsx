@@ -79,7 +79,7 @@ export default function SessionDetailClient({ sessionId }: SessionDetailClientPr
 
     if (!token || !sessionId) {
       setGateState("denied");
-      router.replace("/denied");
+      router.replace("/access-denied");
       return;
     }
 
@@ -92,7 +92,7 @@ export default function SessionDetailClient({ sessionId }: SessionDetailClientPr
         if (!valid) {
           clearStoredToken();
           setGateState("denied");
-          router.replace("/denied");
+          router.replace("/access-denied");
           return;
         }
         setGateState("allowed");
@@ -119,7 +119,7 @@ export default function SessionDetailClient({ sessionId }: SessionDetailClientPr
       .catch(() => {
         clearStoredToken();
         setGateState("denied");
-        router.replace("/denied");
+        router.replace("/access-denied");
       });
   }, [router, sessionId]);
 

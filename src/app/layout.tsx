@@ -1,15 +1,13 @@
 import type { ReactNode } from "react";
+import type { Viewport } from "next";
 import { Space_Grotesk, Space_Mono } from "next/font/google";
-import ThemeToggle from "../components/theme-toggle";
 import "./globals.css";
 
 const themeScript = `
   (function () {
     try {
-      var stored = localStorage.getItem("theme");
-      var theme = stored || "dark";
-      if (theme === "dark") document.documentElement.classList.add("dark");
-      else document.documentElement.classList.remove("dark");
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme", "dark");
     } catch (e) {}
   })();
 `;
@@ -22,6 +20,15 @@ export const metadata = {
   description: "Automation for club sessions"
 };
 
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#0d0612" },
+    { media: "(prefers-color-scheme: light)", color: "#0d0612" }
+  ],
+  viewportFit: "cover",
+  colorScheme: "dark"
+};
+
 type RootLayoutProps = {
   children: ReactNode;
 };
@@ -31,7 +38,6 @@ export default function RootLayout({ children }: RootLayoutProps) {
     <html lang="en" className={`${spaceGrotesk.variable} ${spaceMono.variable}`} suppressHydrationWarning>
       <body className="page-shell relative font-sans" suppressHydrationWarning>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-        <ThemeToggle className="absolute right-4 top-4 z-40 sm:right-6 sm:top-6" />
         {children}
       </body>
     </html>

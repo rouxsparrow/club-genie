@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import AnimatedBackground from "../../components/v2/AnimatedBackground";
@@ -177,6 +177,8 @@ export default function SessionsV2Page() {
   const [loading, setLoading] = useState(true);
   const [confettiTrigger, setConfettiTrigger] = useState(0);
   const [confettiOrigin, setConfettiOrigin] = useState({ x: 0.5, y: 0.5 });
+  const [renderEpoch, setRenderEpoch] = useState(0);
+  const lastResumeEpochAtRef = useRef(0);
   const [sessions, setSessions] = useState<Session[]>(mockSessions);
   const [filter, setFilter] = useState<"upcoming" | "past">("upcoming");
   
@@ -197,6 +199,29 @@ export default function SessionsV2Page() {
     }, 1500);
     
     return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const bumpEpoch = () => {
+      const now = Date.now();
+      if (now - lastResumeEpochAtRef.current < 800) return;
+      lastResumeEpochAtRef.current = now;
+      setRenderEpoch((prev) => prev + 1);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") bumpEpoch();
+    };
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) bumpEpoch();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pageshow", handlePageShow);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pageshow", handlePageShow);
+    };
   }, []);
 
   // Haptic feedback helper
@@ -296,9 +321,9 @@ export default function SessionsV2Page() {
   }
 
   return (
-    <div className="v2-page">
+    <div className="v2-page v2-ios-safari-safe">
       {/* Animated Background */}
-      <AnimatedBackground />
+      <AnimatedBackground key={`sessions-v2-bg-${renderEpoch}`} />
 
       {/* Confetti Effect */}
       <Confetti trigger={confettiTrigger} originX={confettiOrigin.x} originY={confettiOrigin.y} />

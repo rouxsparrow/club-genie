@@ -1008,7 +1008,7 @@ export default function AdminPage() {
   return (
     <main className="v2-page v2-admin-page">
       <AnimatedBackground />
-      <div className="relative z-10 mx-auto max-w-5xl px-6 py-16">
+      <div className="relative z-10 mx-auto max-w-5xl px-4 py-12 sm:px-6 sm:py-16">
         <header className="flex flex-col gap-6">
           <AdminNavbar currentPath="/admin" className="v2-admin-nav v2-admin-navbar" />
           <div className="flex flex-wrap items-start justify-between gap-6">
@@ -1022,7 +1022,7 @@ export default function AdminPage() {
           </div>
         </header>
 
-        <nav className="v2-admin-tab-nav mt-8 flex flex-wrap gap-3">
+        <nav className="v2-admin-tab-nav mt-8 flex gap-3 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
         <button
           type="button"
           onClick={() => setActiveTab("accounts")}
@@ -1519,8 +1519,8 @@ export default function AdminPage() {
             {automationRunHistory.length === 0 ? (
               <p className="mt-4 text-sm text-slate-500">{loadingAutomationRunHistory ? "" : "No runs found."}</p>
             ) : (
-              <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-ink-700/60">
-                <table className="min-w-[900px] w-full text-left text-sm">
+              <div className="v2-admin-table-wrap mt-4 overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-ink-700/60">
+                <table className="w-full min-w-[640px] text-left text-xs sm:min-w-[900px] sm:text-sm">
                   <thead className="bg-slate-100/70 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-ink-900/40 dark:text-slate-300">
                     <tr>
                       <th className="px-4 py-3">Started</th>
@@ -1836,8 +1836,8 @@ export default function AdminPage() {
               {splitwiseRunHistory.length === 0 ? (
                 <p className="mt-4 text-sm text-slate-500">{loadingSplitwiseRunHistory ? "" : "No runs found."}</p>
               ) : (
-                <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-ink-700/60">
-                  <table className="min-w-[900px] w-full text-left text-sm">
+                <div className="v2-admin-table-wrap mt-4 overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-ink-700/60">
+                  <table className="w-full min-w-[640px] text-left text-xs sm:min-w-[900px] sm:text-sm">
                     <thead className="bg-slate-100/70 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-ink-900/40 dark:text-slate-300">
                       <tr>
                         <th className="px-4 py-3">Started</th>
@@ -1970,8 +1970,8 @@ export default function AdminPage() {
               {splitwiseExpenseRecords.length === 0 ? (
                 <p className="mt-4 text-sm text-slate-500">{loadingSplitwiseRecords ? "" : "No records loaded yet."}</p>
               ) : (
-                <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-ink-700/60">
-                  <table className="min-w-[900px] w-full text-left text-sm">
+                <div className="v2-admin-table-wrap mt-4 overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-ink-700/60">
+                  <table className="w-full min-w-[640px] text-left text-xs sm:min-w-[900px] sm:text-sm">
                     <thead className="bg-slate-100/70 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-ink-900/40 dark:text-slate-300">
                       <tr>
                         <th className="px-4 py-3">Session</th>

@@ -1853,6 +1853,8 @@
 }
 
 .v2-admin-page .v2-admin-tab-nav button {
+  flex: 0 0 auto;
+  white-space: nowrap;
   transition:
     transform 0.2s var(--v2-smooth),
     border-color 0.2s var(--v2-smooth),
@@ -1960,6 +1962,22 @@
   background: rgba(12, 7, 22, 0.72) !important;
 }
 
+.v2-admin-page .v2-admin-table-wrap {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+@media (max-width: 639px) {
+  .v2-admin-page .v2-admin-tab-nav {
+    flex-wrap: nowrap;
+  }
+
+  .v2-admin-page .v2-admin-table-wrap {
+    margin-left: -4px;
+    margin-right: -4px;
+  }
+}
+
 .v2-admin-page thead {
   background: rgba(255, 255, 255, 0.04) !important;
   color: var(--v2-text-secondary) !important;
@@ -1971,6 +1989,42 @@
 
 .v2-admin-page code {
   color: rgba(248, 250, 252, 0.92);
+}
+
+/* ========================================
+   MOBILE COMPOSITOR FALLBACKS (SESSIONS ONLY)
+   ======================================== */
+
+@media (hover: none) and (pointer: coarse) {
+  .v2-ios-safari-safe {
+    -webkit-transform: none !important;
+    transform: none !important;
+  }
+
+  .v2-ios-safari-safe .v2-mesh-bg {
+    position: absolute;
+    -webkit-transform: none !important;
+    transform: none !important;
+  }
+
+  .v2-ios-safari-safe .v2-mesh-blob {
+    display: none;
+    animation: none;
+    filter: none;
+  }
+
+  .v2-ios-safari-safe .v2-dialog-overlay,
+  .v2-ios-safari-safe .v2-dialog-content,
+  .v2-ios-safari-safe .v2-admin-dialog-content {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .v2-ios-safari-safe .v2-card {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    background: rgba(26, 10, 46, 0.84);
+  }
 }
 
 /* Reduced motion */

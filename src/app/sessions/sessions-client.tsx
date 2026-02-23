@@ -1,7 +1,7 @@
 "use client";
 
 import { Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminNavbar from "../../components/admin-navbar";
 import AnimatedBackground from "../../components/v2/AnimatedBackground";
@@ -15,11 +15,18 @@ import {
   listPlayers,
   listSessions,
   setSessionGuests,
-  validateClubToken,
+  updateSessionParticipation,
+  validateClubTokenDetailed,
   withdrawSession
 } from "../../lib/edge";
 import { formatCourtLabelForDisplay, formatCourtTimeRangeForDisplay } from "../../lib/session-court-display";
 import { formatSessionLocationForDisplay } from "../../lib/session-location";
+import {
+  buildParticipationUpdatePayload,
+  buildSelectedParticipantRows,
+  computeParticipationDiff,
+  replaceParticipantsForSession
+} from "../../lib/session-participation-submit";
 import { normalizeGuestCount } from "../../lib/session-guests";
 import { combineDateAndTimeToIso, isQuarterHourTime, toLocalTime } from "../../lib/session-time";
 import {
@@ -31,7 +38,7 @@ import {
   type SessionsV2Filter
 } from "../../lib/sessions-v2-view";
 
-type GateState = "checking" | "denied" | "allowed";
+type GateState = "checking" | "denied" | "allowed" | "error";
 type StoredTokenResult = { token: string | null; shouldCleanUrl: boolean };
 type SessionSummary = {
   id: string;
@@ -178,10 +185,27 @@ function buildEmptyForm(): SessionFormState {
   };
 }
 
+function mapParticipationError(error?: string, detail?: string) {
+  if (detail) return detail;
+  if (!error) return "Update failed.";
+  if (error === "invalid_players") return "One or more selected players are invalid or inactive.";
+  if (error === "session_not_open") return "This session is no longer open.";
+  if (error === "session_not_found") return "Session not found.";
+  if (error === "guest_update_failed") return "Guest update failed.";
+  if (error === "update_failed") return "Participant update failed.";
+  return error.replaceAll("_", " ");
+}
+
+function logSubmitTiming(metrics: Record<string, unknown>) {
+  if (process.env.NODE_ENV !== "development") return;
+  console.info("[sessions] submit-participants", metrics);
+}
+
 export default function SessionsClient() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [gateState, setGateState] = useState<GateState>("checking");
+  const [gateErrorMessage, setGateErrorMessage] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [courts, setCourts] = useState<CourtDetail[]>([]);
   const [participants, setParticipants] = useState<ParticipantDetail[]>([]);
@@ -206,6 +230,8 @@ export default function SessionsClient() {
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [confettiTrigger, setConfettiTrigger] = useState(0);
   const [confettiOrigin, setConfettiOrigin] = useState({ x: 0.5, y: 0.7 });
+  const [renderEpoch, setRenderEpoch] = useState(0);
+  const lastResumeEpochAtRef = useRef(0);
   const showDevDelete = isAdmin && process.env.NODE_ENV === "development";
 
   const courtsBySession = useMemo(() => {
@@ -301,91 +327,120 @@ export default function SessionsClient() {
   };
 
   useEffect(() => {
-    setMounted(true);
-    const params = new URLSearchParams(window.location.search);
-    const { token, shouldCleanUrl } = readTokenFromLocation(params);
-    if (!token) {
-      setGateState("denied");
-      router.replace("/access-denied");
-      return;
-    }
-    if (shouldCleanUrl) router.replace("/sessions");
+    const bumpEpoch = () => {
+      const now = Date.now();
+      if (now - lastResumeEpochAtRef.current < 800) return;
+      lastResumeEpochAtRef.current = now;
+      setRenderEpoch((prev) => prev + 1);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") bumpEpoch();
+    };
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) bumpEpoch();
+    };
 
-    validateClubToken(token)
-      .then(async (valid) => {
-        if (!valid) {
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pageshow", handlePageShow);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pageshow", handlePageShow);
+    };
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const { token, shouldCleanUrl } = readTokenFromLocation(params);
+      if (!token) {
+        setGateState("denied");
+        router.replace("/access-denied");
+        return;
+      }
+      if (shouldCleanUrl) router.replace("/sessions");
+
+      const validation = await validateClubTokenDetailed(token);
+      if (cancelled) return;
+      if (!validation.ok) {
+        if (validation.reason === "invalid") {
           clearStoredToken();
           setGateState("denied");
           router.replace("/access-denied");
           return;
         }
+        setGateState("error");
+        setGateErrorMessage("We could not verify your access right now. Check your connection and try again.");
+        setLoading(false);
+        return;
+      }
 
-        setGateState("allowed");
-        const adminResponse = await fetch("/api/admin-session").catch(() => null);
-        let isAdminUser = false;
-        if (adminResponse?.ok) {
-          const adminData = (await adminResponse.json()) as { ok: boolean };
-          isAdminUser = Boolean(adminData.ok);
-          setIsAdmin(isAdminUser);
-        } else {
-          setIsAdmin(false);
-        }
+      setGateErrorMessage(null);
+      setGateState("allowed");
+      const adminResponse = await fetch("/api/admin-session").catch(() => null);
+      if (cancelled) return;
 
-        const [sessionsResponse, playersResponse, adminPlayersResponse] = await Promise.all([
-          listSessions(token),
-          listPlayers(token),
-          isAdminUser ? fetch("/api/admin/players", { credentials: "include" }).then((response) => response.json()).catch(() => null) : Promise.resolve(null)
-        ]);
+      let isAdminUser = false;
+      if (adminResponse?.ok) {
+        const adminData = (await adminResponse.json()) as { ok: boolean };
+        isAdminUser = Boolean(adminData.ok);
+        setIsAdmin(isAdminUser);
+      } else {
+        setIsAdmin(false);
+      }
 
-        if (sessionsResponse?.ok) {
-          setSessions((sessionsResponse.sessions ?? []).map((session) => ({ ...session, guest_count: normalizeGuestCount(session.guest_count) })));
-          setCourts(sessionsResponse.courts ?? []);
-          setParticipants(sessionsResponse.participants ?? []);
-        }
-        if (playersResponse?.ok) setPlayers(playersResponse.players ?? []);
+      const [sessionsResponse, playersResponse, adminPlayersResponse] = await Promise.all([
+        listSessions(token),
+        listPlayers(token),
+        isAdminUser ? fetch("/api/admin/players", { credentials: "include" }).then((response) => response.json()).catch(() => null) : Promise.resolve(null)
+      ]);
+      if (cancelled) return;
 
-        if (isAdminUser) {
-          const payload = adminPlayersResponse as
-            | { ok?: boolean; players?: Array<{ id?: string; name?: string; active?: boolean; is_default_payer?: boolean }> }
-            | null;
-          if (payload?.ok && Array.isArray(payload.players)) {
-            setAdminPlayers(
-              payload.players
-                .filter((player) => typeof player?.id === "string" && typeof player?.name === "string")
-                .map((player) => ({
-                  id: player.id as string,
-                  name: player.name as string,
-                  active: Boolean(player.active),
-                  is_default_payer: Boolean(player.is_default_payer)
-                }))
-            );
-          } else {
-            setAdminPlayers([]);
-          }
+      if (sessionsResponse?.ok) {
+        setSessions((sessionsResponse.sessions ?? []).map((session) => ({ ...session, guest_count: normalizeGuestCount(session.guest_count) })));
+        setCourts(sessionsResponse.courts ?? []);
+        setParticipants(sessionsResponse.participants ?? []);
+      }
+      if (playersResponse?.ok) setPlayers(playersResponse.players ?? []);
+
+      if (isAdminUser) {
+        const payload = adminPlayersResponse as
+          | { ok?: boolean; players?: Array<{ id?: string; name?: string; active?: boolean; is_default_payer?: boolean }> }
+          | null;
+        if (payload?.ok && Array.isArray(payload.players)) {
+          setAdminPlayers(
+            payload.players
+              .filter((player) => typeof player?.id === "string" && typeof player?.name === "string")
+              .map((player) => ({
+                id: player.id as string,
+                name: player.name as string,
+                active: Boolean(player.active),
+                is_default_payer: Boolean(player.is_default_payer)
+              }))
+          );
         } else {
           setAdminPlayers([]);
         }
-        setLoading(false);
-      })
-      .catch(() => {
-        clearStoredToken();
-        setGateState("denied");
-        router.replace("/access-denied");
-      });
-  }, [router]);
-
-  useEffect(() => {
-    if (!joinState.open) return;
-    const body = document.body;
-    const previousOverflow = body.style.overflow;
-    const previousOverscrollBehavior = body.style.overscrollBehavior;
-    body.style.overflow = "hidden";
-    body.style.overscrollBehavior = "contain";
-    return () => {
-      body.style.overflow = previousOverflow;
-      body.style.overscrollBehavior = previousOverscrollBehavior;
+      } else {
+        setAdminPlayers([]);
+      }
+      setLoading(false);
     };
-  }, [joinState.open]);
+
+    void bootstrap().catch(() => {
+      if (cancelled) return;
+      setGateState("error");
+      setGateErrorMessage("Unable to load sessions right now. Please refresh and try again.");
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const openJoinDialog = (sessionId: string) => {
     setActionMessage(null);
@@ -434,68 +489,105 @@ export default function SessionsClient() {
 
   const handleSubmitParticipants = async () => {
     const token = localStorage.getItem(getClubTokenStorageKey());
-    if (!token || !joinState.sessionId) return;
+    const sessionId = joinState.sessionId;
+    if (!token || !sessionId) return;
 
     setJoinDialogError(null);
-    const toJoin = joinState.selectedPlayerIds.filter((id) => !joinState.joinedPlayerIds.includes(id));
-    const toWithdraw = joinState.joinedPlayerIds.filter((id) => !joinState.selectedPlayerIds.includes(id));
-    const guestChanged = guestCount !== initialGuestCount;
+    const submitStartedAt = Date.now();
+    const diff = computeParticipationDiff(joinState.selectedPlayerIds, joinState.joinedPlayerIds, guestCount, initialGuestCount);
 
-    if (toJoin.length === 0 && toWithdraw.length === 0 && !guestChanged) {
+    if (!diff.hasChanges) {
       closeJoinDialog();
       setActionMessage("No participant or guest changes.");
       return;
     }
 
     setJoinState((prev) => ({ ...prev, isSubmitting: true }));
+    const payload = buildParticipationUpdatePayload(sessionId, joinState.selectedPlayerIds, guestCount);
+    let apiCompletedAt = submitStartedAt;
+    let nextGuestCount = normalizeGuestCount(guestCount);
+    let nextParticipants: ParticipantDetail[] = [];
+    let submitError: string | null = null;
+    let usedLegacyFallback = false;
 
-    if (toJoin.length > 0) {
-      const joinResult = await joinSession(token, { sessionId: joinState.sessionId, playerIds: toJoin });
-      if (!joinResult.ok) {
-        setJoinState((prev) => ({ ...prev, isSubmitting: false }));
-        setJoinDialogError(joinResult.error ?? "Join failed.");
-        return;
+    const consolidatedResult = await updateSessionParticipation(token, payload);
+    apiCompletedAt = Date.now();
+
+    if (consolidatedResult.ok) {
+      nextGuestCount = normalizeGuestCount(consolidatedResult.guestCount);
+      nextParticipants = consolidatedResult.participants;
+    } else if (consolidatedResult.unsupportedEndpoint) {
+      usedLegacyFallback = true;
+
+      if (diff.toJoin.length > 0) {
+        const joinResult = await joinSession(token, { sessionId, playerIds: diff.toJoin });
+        if (!joinResult.ok) submitError = mapParticipationError(joinResult.error);
       }
+
+      if (!submitError && diff.toWithdraw.length > 0) {
+        const withdrawResult = await withdrawSession(token, { sessionId, playerIds: diff.toWithdraw });
+        if (!withdrawResult.ok) submitError = mapParticipationError(withdrawResult.error);
+      }
+
+      if (!submitError && diff.guestChanged) {
+        const guestResult = await setSessionGuests(token, { sessionId, guestCount });
+        if (!guestResult.ok) submitError = mapParticipationError(guestResult.error, guestResult.detail);
+        else nextGuestCount = normalizeGuestCount(guestResult.guestCount);
+      }
+
+      if (!submitError) {
+        nextParticipants = buildSelectedParticipantRows(
+          sessionId,
+          players.map((player) => ({ id: player.id, name: player.name, avatar_url: player.avatar_url ?? null })),
+          joinState.selectedPlayerIds
+        );
+      }
+      apiCompletedAt = Date.now();
+    } else {
+      submitError = mapParticipationError(consolidatedResult.error, consolidatedResult.detail);
     }
 
-    if (toWithdraw.length > 0) {
-      const withdrawResult = await withdrawSession(token, { sessionId: joinState.sessionId, playerIds: toWithdraw });
-      if (!withdrawResult.ok) {
-        setJoinState((prev) => ({ ...prev, isSubmitting: false }));
-        setJoinDialogError(withdrawResult.error ?? "Withdraw failed.");
-        return;
-      }
+    if (submitError) {
+      setJoinState((prev) => ({ ...prev, isSubmitting: false }));
+      setJoinDialogError(submitError);
+      logSubmitTiming({
+        mode: usedLegacyFallback ? "legacy-fallback" : "consolidated",
+        success: false,
+        submit_to_api_ms: apiCompletedAt - submitStartedAt
+      });
+      return;
     }
 
-    if (guestChanged) {
-      const guestResult = await setSessionGuests(token, { sessionId: joinState.sessionId, guestCount });
-      if (!guestResult.ok) {
-        setJoinState((prev) => ({ ...prev, isSubmitting: false }));
-        setJoinDialogError(guestResult.detail ?? guestResult.error ?? "Guest update failed.");
-        return;
-      }
-      setSessions((prev) =>
-        prev.map((session) => (session.id === joinState.sessionId ? { ...session, guest_count: normalizeGuestCount(guestResult.guestCount) } : session))
-      );
-    }
-
-    const selectedSet = new Set(joinState.selectedPlayerIds);
-    const selectedParticipantRows = players
-      .filter((player) => selectedSet.has(player.id))
-      .map((player) => ({
-        session_id: joinState.sessionId as string,
-        player: { id: player.id, name: player.name, avatar_url: player.avatar_url ?? null }
-      }));
-    setParticipants((prev) => [...prev.filter((entry) => entry.session_id !== joinState.sessionId), ...selectedParticipantRows]);
-
-    const refreshed = await refreshSessions(token);
     setJoinState((prev) => ({ ...prev, isSubmitting: false }));
     closeJoinDialog();
-    if (toJoin.length === 0 && toWithdraw.length === 0 && guestChanged) setActionMessage(refreshed ? "Guests updated." : "Guests updated. Refresh failed.");
-    else setActionMessage(refreshed ? "Participants updated." : "Participants updated. Refresh failed.");
+    const dialogClosedAt = Date.now();
+
+    setParticipants((prev) => replaceParticipantsForSession(prev, sessionId, nextParticipants));
+    setSessions((prev) =>
+      prev.map((session) => (session.id === sessionId ? { ...session, guest_count: normalizeGuestCount(nextGuestCount) } : session))
+    );
+    setActionMessage(diff.toJoin.length === 0 && diff.toWithdraw.length === 0 && diff.guestChanged ? "Guests updated." : "Participants updated.");
 
     setConfettiOrigin({ x: 0.5, y: 0.7 });
     setConfettiTrigger((prev) => prev + 1);
+
+    void refreshSessions(token)
+      .then((refreshed) => {
+        if (!refreshed) {
+          setActionMessage((previous) => (previous ? `${previous} Refresh failed.` : "Refresh failed."));
+        }
+      })
+      .catch(() => {
+        setActionMessage((previous) => (previous ? `${previous} Refresh failed.` : "Refresh failed."));
+      });
+
+    logSubmitTiming({
+      mode: usedLegacyFallback ? "legacy-fallback" : "consolidated",
+      success: true,
+      submit_to_api_ms: apiCompletedAt - submitStartedAt,
+      api_to_close_ms: dialogClosedAt - apiCompletedAt,
+      total_ms: dialogClosedAt - submitStartedAt
+    });
   };
 
   const openCreateDialog = () => {
@@ -600,10 +692,38 @@ export default function SessionsClient() {
     setFormState((prev) => ({ ...prev, isSubmitting: false, open: false }));
   };
 
+  if (gateState === "error") {
+    return (
+      <div className="v2-page v2-ios-safari-safe">
+        <AnimatedBackground key={`sessions-bg-error-${renderEpoch}`} />
+        <main className="v2-container">
+          <header className="v2-header !px-0 pt-6">
+            <div className="v2-logo">
+              <Sparkles className="mr-2 inline-block text-[var(--v2-primary)]" size={22} />
+              <span>Club</span>
+              <span className="v2-logo-accent">Genie</span>
+            </div>
+          </header>
+          <div className="v2-card py-14 text-center">
+            <h2 className="text-2xl font-semibold">Unable to Verify Access</h2>
+            <p className="mt-2 text-[var(--v2-text-secondary)]">
+              {gateErrorMessage ?? "Something went wrong while validating your token."}
+            </p>
+            <div className="mt-6 flex justify-center">
+              <button type="button" className="v2-dialog-btn v2-dialog-btn-primary" onClick={() => window.location.reload()}>
+                Retry
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   if (gateState !== "allowed") {
     return (
-      <div className="v2-page">
-        <AnimatedBackground />
+      <div className="v2-page v2-ios-safari-safe">
+        <AnimatedBackground key={`sessions-bg-guard-${renderEpoch}`} />
         <main className="v2-container" />
       </div>
     );
@@ -611,8 +731,8 @@ export default function SessionsClient() {
 
   if (!mounted || loading) {
     return (
-      <div className="v2-page">
-        <AnimatedBackground />
+      <div className="v2-page v2-ios-safari-safe">
+        <AnimatedBackground key={`sessions-bg-loading-${renderEpoch}`} />
         <main className="v2-container">
           <header className="v2-header !px-0 pt-6">
             <div className="v2-logo">
@@ -638,8 +758,8 @@ export default function SessionsClient() {
   }
 
   return (
-    <div className="v2-page">
-      <AnimatedBackground />
+    <div className="v2-page v2-ios-safari-safe">
+      <AnimatedBackground key={`sessions-bg-${renderEpoch}`} />
       <Confetti trigger={confettiTrigger} originX={confettiOrigin.x} originY={confettiOrigin.y} />
 
       <main className="v2-container">

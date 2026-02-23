@@ -30,6 +30,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - On parse failure, create a DRAFT session and notify admin via in-app admin error queue.
 - Public users can join or withdraw from OPEN sessions, including multi-player registration.
 - Public users can set per-session anonymous guest count (0-20) in the Join/Withdraw dialog.
+- Submit from Join/Withdraw closes the dialog immediately after server success, updates visible session state optimistically, and refreshes sessions in the background (non-blocking).
 - Admin can edit session details and fix DRAFT sessions.
 - Admin can set a per-session Splitwise payer override from session edit; new sessions default to the current default payer.
 - Admin can manage players (add, rename, deactivate/reactivate).
@@ -54,6 +55,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 ## Access Model
 - A single club-level access token is embedded in the shared link once and stored in localStorage.
 - Missing or invalid token renders Access Denied (no input field).
+- Transient token-validation/network errors should not clear stored token; users should see a retry state instead of Access Denied.
 - All reads/writes go through Edge Functions; no direct browser DB access.
 - Store hashed token for validation in `club_settings.token_hash`, and store the latest raw token in DB for admin invite-link retrieval.
 - Club token admin APIs handle legacy hash-only environments gracefully with actionable warnings until migration is applied.
@@ -74,6 +76,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Idempotent cron jobs and safe re-runs.
 - Hosted on Vercel free tier with Postgres-compatible DB.
 - Basic security: least-privilege API access and admin-only actions.
+- Mobile browser rendering stability on Sessions views is prioritized over maximum visual effects; compositor-safe fallbacks are applied on mobile devices to prevent black-layer artifacts after lock/app-switch resume.
 
 ## Acceptance Criteria
 - Scheduled Apps Script trigger creates/updates sessions from new receipts.

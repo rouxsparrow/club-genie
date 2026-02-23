@@ -76,11 +76,14 @@ export default function PlayerSelectionDialog({
     
     const scrollY = window.scrollY;
     const originalOverflow = document.body.style.overflow;
+    const originalOverscrollBehavior = document.body.style.overscrollBehavior;
     
     document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "contain";
 
     return () => {
       document.body.style.overflow = originalOverflow;
+      document.body.style.overscrollBehavior = originalOverscrollBehavior;
       window.scrollTo(0, scrollY);
     };
   }, [isOpen]);

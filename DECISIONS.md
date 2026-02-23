@@ -85,6 +85,12 @@
 - Decision: Use a Gmail Apps Script bridge as the ingestion scheduler and email fetch source. The bridge runs daily via Apps Script trigger, pulls Gmail receipts, calls Supabase `ingest-receipts` with `AUTOMATION_SECRET`, applies a processed label, and logs summary records to `automation_run_history` via `log-ingestion-run`. Admin manual run and preview now call the bridge webhook (`manual_ingest` / `preview`) via server-only envs `APPS_SCRIPT_BRIDGE_URL` and `APPS_SCRIPT_BRIDGE_SECRET`. Keep existing Supabase Gmail OAuth functions as rollback path only.
 - Rationale: Removes app-runtime dependency on Gmail refresh-token exchange (`gmail_token_failed` risk), keeps the stack within free-tier limits, preserves existing ingestion parsing contracts, and allows fast recovery with admin manual runs.
 
+## ADR-0015: Consolidate Session Participant Submit into a Single Edge Call for Faster UX
+- Date: 2026-02-23
+- Status: Accepted
+- Decision: Add `update-session-participation` Edge Function that accepts final participant selection + guest count (`sessionId`, `playerIds`, `guestCount`) and applies join/withdraw/guest updates in one request. `/sessions` submit now uses this endpoint first, closes dialog immediately on success, applies local state patch, and refreshes sessions in the background. If endpoint is unavailable (404), client falls back to legacy join/withdraw/guest endpoints.
+- Rationale: Reduces submit latency and removes visible submit flicker caused by multiple serial network calls and blocking full refresh before dialog close, while preserving backward compatibility during rollout.
+
 ## Pending Decisions
 - Player identity model (predefined list vs free-text vs hybrid).
 - Session edit rules (post-close edits, participant locking, Splitwise regeneration).

@@ -27,14 +27,30 @@ function buildEdgeHeaders(token: string) {
   } as const;
 }
 
-export async function validateClubToken(token: string) {
-  const url = `${getEdgeFunctionBaseUrl()}/validate-token`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: buildEdgeHeaders(token)
-  });
+export type ClubTokenValidationResult =
+  | { ok: true }
+  | { ok: false; reason: "invalid"; status: 403 }
+  | { ok: false; reason: "error"; status: number | null };
 
-  return response.ok;
+export async function validateClubTokenDetailed(token: string): Promise<ClubTokenValidationResult> {
+  const url = `${getEdgeFunctionBaseUrl()}/validate-token`;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: buildEdgeHeaders(token)
+    });
+
+    if (response.ok) return { ok: true };
+    if (response.status === 403) return { ok: false, reason: "invalid", status: 403 };
+    return { ok: false, reason: "error", status: response.status || null };
+  } catch {
+    return { ok: false, reason: "error", status: null };
+  }
+}
+
+export async function validateClubToken(token: string) {
+  const result = await validateClubTokenDetailed(token);
+  return result.ok;
 }
 
 type RotateTokenResponse = {
@@ -221,6 +237,76 @@ export async function setSessionGuests(
     return data ?? { ok: false, error: "request_failed" };
   }
   return data ?? { ok: false, error: "request_failed" };
+}
+
+type UpdateSessionParticipationPayload = {
+  sessionId: string;
+  playerIds: string[];
+  guestCount: number;
+};
+
+type UpdateSessionParticipationSuccess = {
+  ok: true;
+  status: number;
+  sessionId: string;
+  guestCount: number;
+  participants: ParticipantDetail[];
+};
+
+type UpdateSessionParticipationFailure = {
+  ok: false;
+  status: number | null;
+  error: string;
+  detail?: string;
+  unsupportedEndpoint?: boolean;
+};
+
+export type UpdateSessionParticipationResponse = UpdateSessionParticipationSuccess | UpdateSessionParticipationFailure;
+
+export async function updateSessionParticipation(
+  token: string,
+  payload: UpdateSessionParticipationPayload
+): Promise<UpdateSessionParticipationResponse> {
+  const url = `${getEdgeFunctionBaseUrl()}/update-session-participation`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      ...buildEdgeHeaders(token),
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (response.status === 404) {
+    return {
+      ok: false,
+      status: 404,
+      error: "unsupported_endpoint",
+      unsupportedEndpoint: true
+    };
+  }
+
+  const data = (await response.json().catch(() => null)) as
+    | { ok?: boolean; error?: string; detail?: string; sessionId?: string; guestCount?: number; participants?: ParticipantDetail[] }
+    | null;
+
+  if (!response.ok || !data?.ok) {
+    return {
+      ok: false,
+      status: response.status || null,
+      error: data?.error ?? "request_failed",
+      detail: data?.detail,
+      unsupportedEndpoint: false
+    };
+  }
+
+  return {
+    ok: true,
+    status: response.status,
+    sessionId: typeof data.sessionId === "string" ? data.sessionId : payload.sessionId,
+    guestCount: typeof data.guestCount === "number" ? data.guestCount : payload.guestCount,
+    participants: Array.isArray(data.participants) ? data.participants : []
+  };
 }
 
 type ReceiptError = {

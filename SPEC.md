@@ -46,6 +46,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Session closing cron creates Splitwise expenses and marks sessions CLOSED, idempotently.
 - Sessions display participants as avatar circles only (including guest indicator when guests are added); participant names are not expanded on card tap.
 - Sessions page tabs use `Upcoming` and `Past` filters: public users see `OPEN/FULL` in Upcoming and `CLOSED` in Past; admin users also see `DRAFT` sessions in Past for fix workflows.
+- Keep `/sessions` on the current V2 experience; preserve the pre-V2 Sessions UI at `/sessions-legacy` for fallback/reference without changing primary user flow.
 - Join/Withdraw player picker shows avatar + name rows.
 - Session cards show participant count as "`x players joined`", and include guest indicator when guests are added.
 - Sessions page location display removes a leading `Club` prefix for readability (display-only; stored value unchanged).

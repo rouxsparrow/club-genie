@@ -91,6 +91,12 @@
 - Decision: Add `update-session-participation` Edge Function that accepts final participant selection + guest count (`sessionId`, `playerIds`, `guestCount`) and applies join/withdraw/guest updates in one request. `/sessions` submit now uses this endpoint first, closes dialog immediately on success, applies local state patch, and refreshes sessions in the background. If endpoint is unavailable (404), client falls back to legacy join/withdraw/guest endpoints.
 - Rationale: Reduces submit latency and removes visible submit flicker caused by multiple serial network calls and blocking full refresh before dialog close, while preserving backward compatibility during rollout.
 
+## ADR-0016: Preserve Legacy Sessions UI on Separate Route Without Replacing Primary V2 Route
+- Date: 2026-03-17
+- Status: Accepted
+- Decision: Keep `/sessions` as the primary V2 sessions experience on `main`, and preserve the old sessions page on a separate route `/sessions-legacy`. Do not reuse `/sessions-v2` for legacy preservation because that path is already owned by the latest branch history.
+- Rationale: Avoids merge/path conflicts with existing V2 work, keeps primary user flow unchanged, and provides a low-risk fallback/reference route for legacy behavior during transition.
+
 ## Pending Decisions
 - Player identity model (predefined list vs free-text vs hybrid).
 - Session edit rules (post-close edits, participant locking, Splitwise regeneration).

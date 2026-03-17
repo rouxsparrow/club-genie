@@ -34,6 +34,14 @@ export default function HomePage() {
               <ShieldCheck size={16} />
               Admin Login
             </Link>
+            {process.env.NODE_ENV === "development" ? (
+              <Link
+                href="/sessions-legacy"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-[var(--v2-border)] px-5 text-sm font-semibold text-[var(--v2-text-primary)] transition hover:border-[var(--v2-border-strong)] sm:h-12"
+              >
+                Legacy Sessions
+              </Link>
+            ) : null}
           </div>
         </section>
       </main>

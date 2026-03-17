@@ -2032,6 +2032,17 @@
     position: absolute;
     -webkit-transform: none !important;
     transform: none !important;
+    isolation: isolate;
+    contain: paint;
+    will-change: auto;
+  }
+
+  .v2-ios-safari-safe .v2-mesh-gradient {
+    animation-duration: 36s;
+    opacity: 0.5;
+    transform: translate3d(0, 0, 0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
   }
 
   .v2-ios-safari-safe .v2-mesh-blob {
@@ -2051,6 +2062,11 @@
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
     background: rgba(26, 10, 46, 0.84);
+  }
+
+  .v2-ios-safari-safe.v2-resume-repaint .v2-mesh-bg {
+    opacity: 0.999;
+    transform: translate3d(0, 0, 0) !important;
   }
 }
 

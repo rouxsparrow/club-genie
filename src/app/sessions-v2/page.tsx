@@ -178,7 +178,10 @@ export default function SessionsV2Page() {
   const [confettiTrigger, setConfettiTrigger] = useState(0);
   const [confettiOrigin, setConfettiOrigin] = useState({ x: 0.5, y: 0.5 });
   const [renderEpoch, setRenderEpoch] = useState(0);
+  const [resumeRepaintPulse, setResumeRepaintPulse] = useState(false);
   const lastResumeEpochAtRef = useRef(0);
+  const repaintRafOneRef = useRef<number | null>(null);
+  const repaintRafTwoRef = useRef<number | null>(null);
   const [sessions, setSessions] = useState<Session[]>(mockSessions);
   const [filter, setFilter] = useState<"upcoming" | "past">("upcoming");
   
@@ -202,25 +205,54 @@ export default function SessionsV2Page() {
   }, []);
 
   useEffect(() => {
+    const triggerRepaintPulse = () => {
+      if (repaintRafOneRef.current !== null) {
+        window.cancelAnimationFrame(repaintRafOneRef.current);
+      }
+      if (repaintRafTwoRef.current !== null) {
+        window.cancelAnimationFrame(repaintRafTwoRef.current);
+      }
+      setResumeRepaintPulse(true);
+      repaintRafOneRef.current = window.requestAnimationFrame(() => {
+        repaintRafTwoRef.current = window.requestAnimationFrame(() => {
+          setResumeRepaintPulse(false);
+          repaintRafOneRef.current = null;
+          repaintRafTwoRef.current = null;
+        });
+      });
+    };
+
     const bumpEpoch = () => {
       const now = Date.now();
       if (now - lastResumeEpochAtRef.current < 800) return;
       lastResumeEpochAtRef.current = now;
       setRenderEpoch((prev) => prev + 1);
+      triggerRepaintPulse();
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") bumpEpoch();
     };
     const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) bumpEpoch();
+      if (event.persisted || document.visibilityState === "visible") bumpEpoch();
+    };
+    const handleFocus = () => {
+      if (document.visibilityState === "visible") bumpEpoch();
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("focus", handleFocus);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("focus", handleFocus);
+      if (repaintRafOneRef.current !== null) {
+        window.cancelAnimationFrame(repaintRafOneRef.current);
+      }
+      if (repaintRafTwoRef.current !== null) {
+        window.cancelAnimationFrame(repaintRafTwoRef.current);
+      }
     };
   }, []);
 
@@ -320,8 +352,10 @@ export default function SessionsV2Page() {
     return <div className="min-h-screen bg-[#0d0612]" />;
   }
 
+  const sessionsV2PageClassName = `v2-page v2-ios-safari-safe${resumeRepaintPulse ? " v2-resume-repaint" : ""}`;
+
   return (
-    <div className="v2-page v2-ios-safari-safe">
+    <div className={sessionsV2PageClassName}>
       {/* Animated Background */}
       <AnimatedBackground key={`sessions-v2-bg-${renderEpoch}`} />
 

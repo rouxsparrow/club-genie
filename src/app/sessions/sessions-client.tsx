@@ -231,7 +231,10 @@ export default function SessionsClient() {
   const [confettiTrigger, setConfettiTrigger] = useState(0);
   const [confettiOrigin, setConfettiOrigin] = useState({ x: 0.5, y: 0.7 });
   const [renderEpoch, setRenderEpoch] = useState(0);
+  const [resumeRepaintPulse, setResumeRepaintPulse] = useState(false);
   const lastResumeEpochAtRef = useRef(0);
+  const repaintRafOneRef = useRef<number | null>(null);
+  const repaintRafTwoRef = useRef<number | null>(null);
   const showDevDelete = isAdmin && process.env.NODE_ENV === "development";
 
   const courtsBySession = useMemo(() => {
@@ -327,27 +330,58 @@ export default function SessionsClient() {
   };
 
   useEffect(() => {
+    const triggerRepaintPulse = () => {
+      if (repaintRafOneRef.current !== null) {
+        window.cancelAnimationFrame(repaintRafOneRef.current);
+      }
+      if (repaintRafTwoRef.current !== null) {
+        window.cancelAnimationFrame(repaintRafTwoRef.current);
+      }
+      setResumeRepaintPulse(true);
+      repaintRafOneRef.current = window.requestAnimationFrame(() => {
+        repaintRafTwoRef.current = window.requestAnimationFrame(() => {
+          setResumeRepaintPulse(false);
+          repaintRafOneRef.current = null;
+          repaintRafTwoRef.current = null;
+        });
+      });
+    };
+
     const bumpEpoch = () => {
       const now = Date.now();
       if (now - lastResumeEpochAtRef.current < 800) return;
       lastResumeEpochAtRef.current = now;
       setRenderEpoch((prev) => prev + 1);
+      triggerRepaintPulse();
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") bumpEpoch();
     };
     const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) bumpEpoch();
+      if (event.persisted || document.visibilityState === "visible") bumpEpoch();
+    };
+    const handleFocus = () => {
+      if (document.visibilityState === "visible") bumpEpoch();
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("focus", handleFocus);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("focus", handleFocus);
+      if (repaintRafOneRef.current !== null) {
+        window.cancelAnimationFrame(repaintRafOneRef.current);
+      }
+      if (repaintRafTwoRef.current !== null) {
+        window.cancelAnimationFrame(repaintRafTwoRef.current);
+      }
     };
   }, []);
+
+  const sessionsPageClassName = `v2-page v2-ios-safari-safe${resumeRepaintPulse ? " v2-resume-repaint" : ""}`;
 
   useEffect(() => {
     setMounted(true);
@@ -694,7 +728,7 @@ export default function SessionsClient() {
 
   if (gateState === "error") {
     return (
-      <div className="v2-page v2-ios-safari-safe">
+      <div className={sessionsPageClassName}>
         <AnimatedBackground key={`sessions-bg-error-${renderEpoch}`} />
         <main className="v2-container">
           <header className="v2-header !px-0 pt-6">
@@ -722,7 +756,7 @@ export default function SessionsClient() {
 
   if (gateState !== "allowed") {
     return (
-      <div className="v2-page v2-ios-safari-safe">
+      <div className={sessionsPageClassName}>
         <AnimatedBackground key={`sessions-bg-guard-${renderEpoch}`} />
         <main className="v2-container" />
       </div>
@@ -731,7 +765,7 @@ export default function SessionsClient() {
 
   if (!mounted || loading) {
     return (
-      <div className="v2-page v2-ios-safari-safe">
+      <div className={sessionsPageClassName}>
         <AnimatedBackground key={`sessions-bg-loading-${renderEpoch}`} />
         <main className="v2-container">
           <header className="v2-header !px-0 pt-6">
@@ -758,7 +792,7 @@ export default function SessionsClient() {
   }
 
   return (
-    <div className="v2-page v2-ios-safari-safe">
+    <div className={sessionsPageClassName}>
       <AnimatedBackground key={`sessions-bg-${renderEpoch}`} />
       <Confetti trigger={confettiTrigger} originX={confettiOrigin.x} originY={confettiOrigin.y} />
 

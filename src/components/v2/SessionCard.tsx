@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Clock, MapPin, Pencil, Trash2 } from "lucide-react";
+import { Clock, MapPin, Pencil, Trash2 } from "../icons";
 
 export interface Participant {
   id: string;

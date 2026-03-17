@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
-import { Lock } from "lucide-react";
+import { Lock } from "../../components/icons";
 
 const floatingEmojiItems = [
   { icon: "\u{1F6AB}", left: "8vw", top: "10vh" },

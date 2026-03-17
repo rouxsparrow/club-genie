@@ -1,6 +1,6 @@
 "use client";
 
-import { Lock, UserPlus } from "lucide-react";
+import { Lock, UserPlus } from "../../components/icons";
 import { useEffect, useMemo, useState } from "react";
 import AdminAccountsPanel from "../../components/admin-accounts-panel";
 import AdminNavbar from "../../components/admin-navbar";

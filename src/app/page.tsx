@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarDays, ShieldCheck, Sparkles } from "lucide-react";
+import { CalendarDays, ShieldCheck, Sparkles } from "../components/icons";
 import AnimatedBackground from "../components/v2/AnimatedBackground";
 import "./globals-v2.css";
 

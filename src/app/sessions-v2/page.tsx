@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles } from "lucide-react";
+import { Sparkles } from "../../components/icons";
 import AnimatedBackground from "../../components/v2/AnimatedBackground";
 import SessionCard, { type Session } from "../../components/v2/SessionCard";
 import PlayerSelectionDialog from "../../components/v2/PlayerSelectionDialog";

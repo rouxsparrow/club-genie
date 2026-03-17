@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Check, Minus, Plus, UserPlus } from "lucide-react";
+import { X, Check, Minus, Plus, UserPlus } from "../icons";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { type Session } from "./SessionCard";

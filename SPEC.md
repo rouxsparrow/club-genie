@@ -77,7 +77,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Idempotent cron jobs and safe re-runs.
 - Hosted on Vercel free tier with Postgres-compatible DB.
 - Basic security: least-privilege API access and admin-only actions.
-- Mobile browser rendering stability on Sessions views is prioritized over maximum visual effects; compositor-safe fallbacks are applied on mobile devices to prevent black-layer artifacts after lock/app-switch resume.
+- Mobile browser rendering stability on Sessions views is prioritized over animation parity; coarse-pointer mobile devices use a static mesh background fallback (no blur-blob motion) to prevent black-layer artifacts after lock/app-switch resume while preserving V2 branding.
 
 ## Acceptance Criteria
 - Scheduled Apps Script trigger creates/updates sessions from new receipts.

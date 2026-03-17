@@ -100,6 +100,16 @@
   opacity: 0.6;
 }
 
+.v2-mesh-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.02;
+  background-image:
+    linear-gradient(var(--v2-primary) 1px, transparent 1px),
+    linear-gradient(90deg, var(--v2-primary) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
 .v2-mesh-blob {
   position: absolute;
   border-radius: 50%;
@@ -135,6 +145,13 @@
   top: 50%;
   left: 50%;
   animation-delay: -10s;
+}
+
+.v2-mesh-bg-static .v2-mesh-gradient-static {
+  inset: 0;
+  opacity: 0.52;
+  animation: none;
+  transform: none;
 }
 
 @keyframes meshFloat {
@@ -2038,17 +2055,33 @@
   }
 
   .v2-ios-safari-safe .v2-mesh-gradient {
-    animation-duration: 36s;
+    animation: none !important;
     opacity: 0.5;
-    transform: translate3d(0, 0, 0);
+    transform: none !important;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
   }
 
   .v2-ios-safari-safe .v2-mesh-blob {
     display: none;
-    animation: none;
-    filter: none;
+    animation: none !important;
+    filter: none !important;
+  }
+
+  .v2-ios-safari-safe .v2-mesh-bg-static {
+    position: absolute;
+    inset: 0;
+  }
+
+  .v2-ios-safari-safe .v2-mesh-bg-static .v2-mesh-gradient-static {
+    inset: 0;
+    opacity: 0.48;
+    animation: none !important;
+    transform: none !important;
+  }
+
+  .v2-ios-safari-safe .v2-mesh-bg-static .v2-mesh-grid {
+    opacity: 0.018;
   }
 
   .v2-ios-safari-safe .v2-dialog-overlay,

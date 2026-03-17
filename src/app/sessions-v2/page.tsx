@@ -355,9 +355,9 @@ export default function SessionsV2Page() {
   const sessionsV2PageClassName = `v2-page v2-ios-safari-safe${resumeRepaintPulse ? " v2-resume-repaint" : ""}`;
 
   return (
-    <div className={sessionsV2PageClassName}>
+    <div className={sessionsV2PageClassName} data-render-epoch={renderEpoch}>
       {/* Animated Background */}
-      <AnimatedBackground key={`sessions-v2-bg-${renderEpoch}`} />
+      <AnimatedBackground mobileSafe />
 
       {/* Confetti Effect */}
       <Confetti trigger={confettiTrigger} originX={confettiOrigin.x} originY={confettiOrigin.y} />

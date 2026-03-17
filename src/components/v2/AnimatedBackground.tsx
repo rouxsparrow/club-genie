@@ -1,10 +1,39 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 
-export default function AnimatedBackground() {
+type AnimatedBackgroundProps = {
+  mobileSafe?: boolean;
+};
+
+export default function AnimatedBackground({ mobileSafe = false }: AnimatedBackgroundProps) {
+  const [isCoarsePointer, setIsCoarsePointer] = useState(false);
+
+  useEffect(() => {
+    if (!mobileSafe || typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mediaQuery = window.matchMedia("(hover: none) and (pointer: coarse)");
+    const syncMode = () => setIsCoarsePointer(mediaQuery.matches);
+    syncMode();
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", syncMode);
+      return () => mediaQuery.removeEventListener("change", syncMode);
+    }
+    mediaQuery.addListener(syncMode);
+    return () => mediaQuery.removeListener(syncMode);
+  }, [mobileSafe]);
+
+  if (mobileSafe && isCoarsePointer) {
+    return (
+      <div className="v2-mesh-bg v2-mesh-bg-static" aria-hidden="true">
+        <div className="v2-mesh-gradient v2-mesh-gradient-static" />
+        <div className="v2-mesh-grid" />
+      </div>
+    );
+  }
+
   return (
-    <div className="v2-mesh-bg">
+    <div className="v2-mesh-bg" aria-hidden="true">
       {/* Animated gradient overlay */}
       <motion.div 
         className="v2-mesh-gradient"
@@ -65,16 +94,7 @@ export default function AnimatedBackground() {
       />
       
       {/* Grid pattern overlay */}
-      <div 
-        className="absolute inset-0 opacity-[0.02]"
-        style={{
-          backgroundImage: `
-            linear-gradient(var(--v2-primary) 1px, transparent 1px),
-            linear-gradient(90deg, var(--v2-primary) 1px, transparent 1px)
-          `,
-          backgroundSize: '60px 60px',
-        }}
-      />
+      <div className="v2-mesh-grid" />
     </div>
   );
 }

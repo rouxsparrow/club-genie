@@ -8,7 +8,7 @@ import PlayerAvatarCircle from "../../components/player-avatar-circle";
 import AnimatedBackground from "../../components/v2/AnimatedBackground";
 import "../globals-v2.css";
 
-type TabKey = "accounts" | "players" | "club" | "automation" | "emails" | "gmail" | "splitwise";
+type TabKey = "accounts" | "players" | "club" | "automation" | "emails" | "splitwise";
 
 type Player = {
   id: string;
@@ -44,16 +44,6 @@ type AutomationSettings = {
   enabled: boolean;
   updated_at: string | null;
 };
-
-type GmailConfig = {
-  id: number;
-  client_id: string;
-  client_secret: string;
-  refresh_token: string;
-  updated_at: string | null;
-};
-
-type GmailConfigSource = "table" | "env" | "empty";
 
 type ClubTokenWarningCode = "migration_missing_token_value" | "token_not_recoverable";
 
@@ -150,14 +140,6 @@ export default function AdminPage() {
     timezone: string | null;
     messages: EmailPreviewMessage[];
   } | null>(null);
-  const [loadingGmailConfig, setLoadingGmailConfig] = useState(true);
-  const [savingGmailConfig, setSavingGmailConfig] = useState(false);
-  const [gmailConfigMessage, setGmailConfigMessage] = useState<string | null>(null);
-  const [gmailClientId, setGmailClientId] = useState("");
-  const [gmailClientSecret, setGmailClientSecret] = useState("");
-  const [gmailRefreshToken, setGmailRefreshToken] = useState("");
-  const [gmailUpdatedAt, setGmailUpdatedAt] = useState<string | null>(null);
-  const [gmailConfigSource, setGmailConfigSource] = useState<GmailConfigSource>("empty");
   const [splitwiseSettings, setSplitwiseSettings] = useState<SplitwiseSettings | null>(null);
   const [splitwiseGroupIdInput, setSplitwiseGroupIdInput] = useState("");
   const [splitwiseCurrencyInput, setSplitwiseCurrencyInput] = useState("SGD");
@@ -267,10 +249,9 @@ export default function AdminPage() {
       fetch("/api/admin/automation-settings", { credentials: "include" }).then((response) => response.json()),
       fetch("/api/admin/receipt-errors", { credentials: "include" }).then((response) => response.json()),
       fetch("/api/admin/club-token/current", { credentials: "include" }).then((response) => response.json()),
-      fetch("/api/admin/gmail-config", { credentials: "include" }).then((response) => response.json()),
       fetch("/api/admin/splitwise-settings", { credentials: "include" }).then((response) => response.json())
     ])
-      .then(([playersData, settingsData, errorsData, tokenData, gmailConfigData, splitwiseSettingsData]) => {
+      .then(([playersData, settingsData, errorsData, tokenData, splitwiseSettingsData]) => {
         if (!isMounted) return;
         const playersPayload = playersData as PlayersResponse;
         if (playersPayload.ok) {
@@ -308,31 +289,6 @@ export default function AdminPage() {
         } else {
           setClubMessage(tokenPayload.error ?? "Failed to load current token from DB.");
         }
-
-        const gmailPayload = gmailConfigData as {
-          ok: boolean;
-          config?: GmailConfig;
-          source?: GmailConfigSource;
-          error?: string;
-        };
-        if (!gmailPayload.ok || !gmailPayload.config) {
-          setGmailConfigMessage(gmailPayload.error ?? "Failed to load Gmail config.");
-        } else {
-          setGmailClientId(gmailPayload.config.client_id ?? "");
-          setGmailClientSecret(gmailPayload.config.client_secret ?? "");
-          setGmailRefreshToken(gmailPayload.config.refresh_token ?? "");
-          setGmailUpdatedAt(gmailPayload.config.updated_at ?? null);
-          const source = gmailPayload.source ?? "empty";
-          setGmailConfigSource(source);
-          if (source === "env") {
-            setGmailConfigMessage("Loaded from runtime env fallback. Save once to persist in database.");
-          } else if (source === "empty") {
-            setGmailConfigMessage("No Gmail config found yet.");
-          } else {
-            setGmailConfigMessage(null);
-          }
-        }
-        setLoadingGmailConfig(false);
 
         const splitwisePayload = splitwiseSettingsData as { ok: boolean; settings?: SplitwiseSettings; error?: string };
         if (splitwisePayload.ok && splitwisePayload.settings) {
@@ -376,8 +332,6 @@ export default function AdminPage() {
         setLoadingAutomation(false);
         setLoadingReceiptErrors(false);
         setClubMessage("Failed to load current token from DB.");
-        setGmailConfigMessage("Failed to load Gmail config.");
-        setLoadingGmailConfig(false);
         setSplitwiseMessage("Failed to load Splitwise settings.");
         setLoadingSplitwise(false);
       });
@@ -571,34 +525,6 @@ export default function AdminPage() {
     });
     setEmailPreviewMessage("Email preview loaded.");
     setLoadingEmailPreview(false);
-  };
-
-  const saveGmailConfig = async () => {
-    setSavingGmailConfig(true);
-    setGmailConfigMessage(null);
-    const response = await fetch("/api/admin/gmail-config", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({
-        clientId: gmailClientId,
-        clientSecret: gmailClientSecret,
-        refreshToken: gmailRefreshToken
-      })
-    });
-    const data = (await response.json()) as { ok: boolean; config?: GmailConfig; error?: string };
-    if (!data.ok || !data.config) {
-      setGmailConfigMessage(data.error ?? "Failed to save Gmail config.");
-      setSavingGmailConfig(false);
-      return;
-    }
-    setGmailClientId(data.config.client_id ?? "");
-    setGmailClientSecret(data.config.client_secret ?? "");
-    setGmailRefreshToken(data.config.refresh_token ?? "");
-    setGmailUpdatedAt(data.config.updated_at ?? null);
-    setGmailConfigSource("table");
-    setGmailConfigMessage("Gmail config saved.");
-    setSavingGmailConfig(false);
   };
 
   const handleAddPlayer = async () => {
@@ -1077,17 +1003,6 @@ export default function AdminPage() {
           }`}
         >
           Email Preview
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("gmail")}
-          className={`rounded-full px-4 py-2 text-sm font-semibold ${
-            activeTab === "gmail"
-              ? "bg-emerald-500 text-slate-900"
-              : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
-          }`}
-        >
-          Gmail Config
         </button>
         <button
           type="button"
@@ -1572,70 +1487,6 @@ export default function AdminPage() {
                 ))}
               </ul>
             )}
-          </div>
-        </section>
-      ) : null}
-
-      {activeTab === "gmail" ? (
-        <section className="mt-8 grid gap-6">
-          <div className="card">
-            <h2 className="text-2xl font-semibold">Gmail OAuth Config</h2>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
-              Stored in Supabase table <code>gmail_oauth_config</code> (row <code>id=1</code>).
-            </p>
-            {gmailConfigMessage ? <p className="mt-3 text-sm text-slate-500">{gmailConfigMessage}</p> : null}
-            <p className="mt-1 text-xs text-slate-400">Source: {gmailConfigSource}</p>
-            {gmailUpdatedAt ? (
-              <p className="mt-1 text-xs text-slate-400">Last updated: {new Date(gmailUpdatedAt).toLocaleString()}</p>
-            ) : null}
-
-            {loadingGmailConfig ? (
-              <p className="mt-4 text-sm text-slate-500">Loading config...</p>
-            ) : (
-              <div className="mt-4 grid gap-4">
-                <label className="text-sm font-semibold">
-                  Client ID
-                  <input
-                    type="text"
-                    value={gmailClientId}
-                    onChange={(event) => setGmailClientId(event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
-                    placeholder="Google OAuth client id"
-                  />
-                </label>
-                <label className="text-sm font-semibold">
-                  Client Secret
-                  <input
-                    type="text"
-                    value={gmailClientSecret}
-                    onChange={(event) => setGmailClientSecret(event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
-                    placeholder="Google OAuth client secret"
-                  />
-                </label>
-                <label className="text-sm font-semibold">
-                  Refresh Token
-                  <textarea
-                    value={gmailRefreshToken}
-                    onChange={(event) => setGmailRefreshToken(event.target.value)}
-                    rows={4}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
-                    placeholder="Google OAuth refresh token"
-                  />
-                </label>
-              </div>
-            )}
-
-            <div className="mt-4">
-              <button
-                type="button"
-                onClick={saveGmailConfig}
-                disabled={loadingGmailConfig || savingGmailConfig}
-                className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"
-              >
-                {savingGmailConfig ? "Saving..." : "Save Gmail Config"}
-              </button>
-            </div>
           </div>
         </section>
       ) : null}

@@ -1258,7 +1258,7 @@ export default function SessionsClient() {
 
       {joinState.open ? (
         <section className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-3 py-3 sm:px-6">
-          <div className="card w-full max-w-2xl max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain p-4 sm:max-h-[calc(100dvh-3rem)] sm:p-6">
+          <div className="card flex w-full max-w-2xl flex-col max-h-[calc(100dvh-1.5rem)] overflow-hidden p-4 sm:max-h-[calc(100dvh-3rem)] sm:p-6">
             <div className="flex items-start justify-between">
               <div>
                 <h2 className="text-2xl font-semibold">Select players</h2>
@@ -1274,36 +1274,42 @@ export default function SessionsClient() {
                 Close
               </button>
             </div>
-            <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
-              {players.length === 0 ? <p className="col-span-3">No players available.</p> : null}
-              {players.map((player) => {
-                const statusText = getPlayerSelectionStatus(player.id, joinState.selectedPlayerIds, joinState.joinedPlayerIds);
-                return (
-                  <button
-                    type="button"
-                    key={player.id}
-                    onClick={() => togglePlayer(player.id)}
-                    className={`tap-feedback min-h-[112px] rounded-2xl border px-2 py-2 text-sm transition sm:min-h-[132px] sm:px-3 sm:py-3 ${
-                      joinState.selectedPlayerIds.includes(player.id)
-                        ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/20 dark:text-emerald-200"
-                        : "border-slate-200/80 text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
-                    }`}
-                  >
-                    <span className="flex h-full w-full flex-col items-center justify-center gap-2 text-center">
-                      <PlayerAvatarCircle
-                        name={player.name}
-                        avatarUrl={player.avatar_url ?? null}
-                        sizeClass="h-12 w-12 text-sm sm:h-14 sm:w-14 sm:text-base"
-                      />
-                      <span className="max-w-full text-sm font-semibold leading-tight sm:text-base">{player.name}</span>
-                      <span className="text-[10px] font-semibold uppercase tracking-wide sm:text-xs">{statusText}</span>
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="mt-4 min-h-0 max-h-[min(390px,calc(100dvh-18rem))] overflow-y-auto overscroll-contain pr-1 sm:max-h-[min(460px,calc(100dvh-22rem))]">
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                {players.length === 0 ? <p className="col-span-3">No players available.</p> : null}
+                {players.map((player) => {
+                  const statusText = getPlayerSelectionStatus(player.id, joinState.selectedPlayerIds, joinState.joinedPlayerIds);
+                  return (
+                    <button
+                      type="button"
+                      key={player.id}
+                      onClick={() => togglePlayer(player.id)}
+                      className={`tap-feedback min-h-[112px] rounded-2xl border px-2 py-2 text-sm transition sm:min-h-[132px] sm:px-3 sm:py-3 ${
+                        joinState.selectedPlayerIds.includes(player.id)
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/20 dark:text-emerald-200"
+                          : "border-slate-200/80 text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
+                      }`}
+                    >
+                      <span className="flex h-full w-full flex-col items-center justify-center gap-2 text-center">
+                        <PlayerAvatarCircle
+                          name={player.name}
+                          avatarUrl={player.avatar_url ?? null}
+                          sizeClass="h-12 w-12 text-sm sm:h-14 sm:w-14 sm:text-base"
+                        />
+                        <span className="max-w-full text-sm font-semibold leading-tight sm:text-base">{player.name}</span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wide sm:text-xs">{statusText}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            {joinDialogError ? <p className="mt-3 text-sm text-rose-400">{joinDialogError}</p> : null}
-            <div className="mt-4 flex items-center justify-between gap-3">
+            <div
+              className="mt-4 border-t border-slate-200/80 pt-3 dark:border-ink-700/60"
+              style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0.5rem)" }}
+            >
+              {joinDialogError ? <p className="mb-3 text-sm text-rose-400">{joinDialogError}</p> : null}
+              <div className="flex items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={handleSubmitParticipants}
@@ -1343,6 +1349,7 @@ export default function SessionsClient() {
                     -
                   </button>
                 </div>
+              </div>
               </div>
             </div>
           </div>

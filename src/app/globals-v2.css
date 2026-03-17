@@ -1247,16 +1247,18 @@
 }
 
 .v2-dialog-content {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 100%;
-  max-height: 85vh;
+  max-height: 85dvh;
   background: rgba(13, 6, 18, 0.95);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--v2-border);
   border-radius: 16px;
   padding: 12px;
-  overflow-y: auto;
+  overflow: hidden;
   overflow-x: hidden;
   position: relative;
   margin: auto;
@@ -1400,6 +1402,23 @@
   color: #ff8eb8;
 }
 
+.v2-dialog-scroll-region {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  max-height: min(390px, calc(100dvh - 290px));
+  padding-right: 2px;
+}
+
+.v2-dialog-footer {
+  margin-top: 12px;
+  padding-bottom: max(0px, env(safe-area-inset-bottom));
+  flex-shrink: 0;
+}
+
 .v2-card-muted {
   border-radius: 12px;
   border: 1px dashed var(--v2-border);
@@ -1413,6 +1432,10 @@
     padding: 16px;
     border-radius: 20px;
   }
+
+  .v2-dialog-scroll-region {
+    max-height: min(420px, calc(100dvh - 320px));
+  }
 }
 
 @media (min-width: 480px) {
@@ -1424,9 +1447,13 @@
 @media (min-width: 640px) {
   .v2-dialog-content {
     max-width: 500px;
-    max-height: 80vh;
+    max-height: 80dvh;
     padding: 24px;
     border-radius: 24px;
+  }
+
+  .v2-dialog-scroll-region {
+    max-height: min(460px, calc(100dvh - 360px));
   }
 }
 
@@ -1497,7 +1524,7 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
   /* Prevent overflow */
   width: 100%;
   min-width: 0;

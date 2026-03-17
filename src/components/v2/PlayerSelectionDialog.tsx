@@ -137,103 +137,106 @@ export default function PlayerSelectionDialog({
               </button>
             </div>
 
-            {/* Player Grid - Static for performance */}
-            <div className="v2-player-grid">
-              {allPlayers.map((player) => {
-                const isSelected = selectedPlayerIds.includes(player.id);
-                const wasOriginallyJoined = session.joinedPlayerIds?.includes(player.id);
-                const showAvatarImage = Boolean(player.avatarUrl) && !failedAvatarIds[player.id];
-                
-                return (
-                  <button
-                    key={player.id}
-                    className={`v2-player-option ${isSelected ? "selected" : ""}`}
-                    onClick={() => onTogglePlayer(player.id)}
-                  >
-                    <div 
-                      className="v2-player-option-avatar"
-                      style={{ 
-                        background: showAvatarImage
-                          ? undefined
-                          : `linear-gradient(135deg, ${getPlayerColor(player.id)}, ${getPlayerColor(player.id + "2")})`
-                      }}
+            <div className="v2-dialog-scroll-region">
+              {/* Player Grid - Static for performance */}
+              <div className="v2-player-grid">
+                {allPlayers.map((player) => {
+                  const isSelected = selectedPlayerIds.includes(player.id);
+                  const wasOriginallyJoined = session.joinedPlayerIds?.includes(player.id);
+                  const showAvatarImage = Boolean(player.avatarUrl) && !failedAvatarIds[player.id];
+
+                  return (
+                    <button
+                      key={player.id}
+                      className={`v2-player-option ${isSelected ? "selected" : ""}`}
+                      onClick={() => onTogglePlayer(player.id)}
                     >
-                      {showAvatarImage ? (
-                        <img
-                          src={player.avatarUrl as string}
-                          alt={player.name}
-                          className="v2-player-option-avatar-image"
-                          loading="lazy"
-                          onError={() => setFailedAvatarIds((prev) => ({ ...prev, [player.id]: true }))}
-                        />
-                      ) : (
-                        getInitials(player.name)
-                      )}
-                      <div className="v2-player-option-check">
-                        <Check size={14} strokeWidth={3} />
+                      <div
+                        className="v2-player-option-avatar"
+                        style={{
+                          background: showAvatarImage
+                            ? undefined
+                            : `linear-gradient(135deg, ${getPlayerColor(player.id)}, ${getPlayerColor(player.id + "2")})`
+                        }}
+                      >
+                        {showAvatarImage ? (
+                          <img
+                            src={player.avatarUrl as string}
+                            alt={player.name}
+                            className="v2-player-option-avatar-image"
+                            loading="lazy"
+                            onError={() => setFailedAvatarIds((prev) => ({ ...prev, [player.id]: true }))}
+                          />
+                        ) : (
+                          getInitials(player.name)
+                        )}
+                        <div className="v2-player-option-check">
+                          <Check size={14} strokeWidth={3} />
+                        </div>
                       </div>
-                    </div>
-                    <span className="v2-player-option-name truncate max-w-full">
-                      {player.name}
-                    </span>
-                    <span className="v2-player-option-status">
-                      {isSelected 
-                        ? wasOriginallyJoined ? "JOINED" : "WILL JOIN"
-                        : wasOriginallyJoined ? "WILL DROP" : "NOT JOINED"
-                      }
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Actions Row - Submit + Guest on same line */}
-            <div className="v2-dialog-actions-row">
-              {/* Submit Button - Left */}
-              <button 
-                className="v2-dialog-btn v2-dialog-btn-primary"
-                onClick={onSubmit}
-                disabled={isSubmitting}
-              >
-                <Check size={18} />
-                {isSubmitting ? "Submitting..." : "Submit"}
-              </button>
-
-              {/* Guest Section - Right */}
-              <div className="v2-guest-wrapper-inline">
-                {!showGuestControls ? (
-                  <button
-                    className="v2-add-guest-btn-inline"
-                    onClick={onShowGuestControls}
-                    disabled={isSubmitting}
-                  >
-                    <UserPlus size={16} />
-                    <span>Add Guest</span>
-                  </button>
-                ) : (
-                  <div className="v2-guest-controls-inline">
-                    <button 
-                      className="v2-guest-btn-inline"
-                      onClick={onDecrementGuest}
-                      disabled={guestCount <= 0}
-                    >
-                      <Minus size={14} />
+                      <span className="v2-player-option-name truncate max-w-full">
+                        {player.name}
+                      </span>
+                      <span className="v2-player-option-status">
+                        {isSelected
+                          ? wasOriginallyJoined ? "JOINED" : "WILL JOIN"
+                          : wasOriginallyJoined ? "WILL DROP" : "NOT JOINED"}
+                      </span>
                     </button>
-                    <span className="v2-guest-count-inline">
-                      {guestCount} Guest{guestCount !== 1 ? "s" : ""}
-                    </span>
-                    <button 
-                      className="v2-guest-btn-inline"
-                      onClick={onIncrementGuest}
-                      disabled={guestCount >= 20}
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                )}
+                  );
+                })}
               </div>
             </div>
-            {errorMessage ? <p className="v2-inline-error">{errorMessage}</p> : null}
+
+            <div className="v2-dialog-footer">
+              {/* Actions Row - Submit + Guest on same line */}
+              <div className="v2-dialog-actions-row">
+                {/* Submit Button - Left */}
+                <button
+                  className="v2-dialog-btn v2-dialog-btn-primary"
+                  onClick={onSubmit}
+                  disabled={isSubmitting}
+                >
+                  <Check size={18} />
+                  {isSubmitting ? "Submitting..." : "Submit"}
+                </button>
+
+                {/* Guest Section - Right */}
+                <div className="v2-guest-wrapper-inline">
+                  {!showGuestControls ? (
+                    <button
+                      className="v2-add-guest-btn-inline"
+                      onClick={onShowGuestControls}
+                      disabled={isSubmitting}
+                    >
+                      <UserPlus size={16} />
+                      <span>Add Guest</span>
+                    </button>
+                  ) : (
+                    <div className="v2-guest-controls-inline">
+                      <button
+                        className="v2-guest-btn-inline"
+                        onClick={onDecrementGuest}
+                        disabled={guestCount <= 0}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="v2-guest-count-inline">
+                        {guestCount} Guest{guestCount !== 1 ? "s" : ""}
+                      </span>
+                      <button
+                        className="v2-guest-btn-inline"
+                        onClick={onIncrementGuest}
+                        disabled={guestCount >= 20}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {errorMessage ? <p className="v2-inline-error">{errorMessage}</p> : null}
+            </div>
           </motion.div>
         </motion.div>
       )}

@@ -1,8 +1,9 @@
-const DEFAULT_QUERY_BASE = 'newer_than:30d subject:"Playtomic" subject:"Receipt"';
+const DEFAULT_QUERY_BASE = 'newer_than:30d ((subject:"Playtomic" subject:"Receipt") OR subject:"Event registration completed")';
 const DEFAULT_PROCESSED_LABEL = "club-genie/ingested";
 const DEFAULT_PREVIEW_LIMIT = 20;
 const DEFAULT_INGEST_LIMIT = 200;
 const MAX_LIMIT = 500;
+const RERUN_MODE_ROW_MESSAGE = "ROW_MESSAGE";
 
 /**
  * Optional helper: call once from Apps Script editor after setting timezone to Asia/Singapore.
@@ -33,7 +34,9 @@ function doPost(e) {
     const action = typeof payload.action === "string" ? payload.action.trim() : "";
     if (action === "manual_ingest") {
       const query = normalizeQuery_(payload.query);
-      return jsonResponse_(runIngestionWithHistory_({ runSource: "ADMIN_MANUAL", query }));
+      const messageIds = normalizeMessageIds_(payload.messageIds);
+      const rerunMode = normalizeRerunMode_(payload.rerunMode);
+      return jsonResponse_(runIngestionWithHistory_({ runSource: "ADMIN_MANUAL", query, messageIds, rerunMode }));
     }
 
     if (action === "preview") {
@@ -56,7 +59,11 @@ function doPost(e) {
 function runIngestionWithHistory_(options) {
   const startedAt = new Date();
   try {
-    const result = processIngestion_({ query: options && options.query });
+    const result = processIngestion_({
+      query: options && options.query,
+      messageIds: options && options.messageIds,
+      rerunMode: options && options.rerunMode
+    });
     const finishedAt = new Date();
     const logOutcome = logIngestionRun_({
       runSource: normalizeRunSource_(options && options.runSource),
@@ -95,49 +102,236 @@ function runIngestionWithHistory_(options) {
 function processIngestion_(options) {
   const config = readConfig_();
   const query = normalizeQuery_(options && options.query);
+  const forcedMessageIds = normalizeMessageIds_(options && options.messageIds);
+  const rerunMode = normalizeRerunMode_(options && options.rerunMode);
+  const isRowMessageRerun = rerunMode === RERUN_MODE_ROW_MESSAGE && forcedMessageIds.length > 0;
   const maxMessages = normalizeLimit_(
     config.ingestLimit ? Number(config.ingestLimit) : null,
     DEFAULT_INGEST_LIMIT
   );
-  const messages = fetchCandidateMessages_(query, maxMessages);
+  const messages = isRowMessageRerun ? [] : fetchCandidateMessages_(query, maxMessages);
   const label = ensureLabel_(config.processedLabel);
+  const seenMessageIds = new Set();
+  const outcomes = [];
+  const debugEntries = [];
+  const processedAt = new Date().toISOString();
+  for (const message of messages) {
+    const messageId = normalizeMessageId_(message && typeof message.getId === "function" ? message.getId() : "");
+    if (!messageId) continue;
+    seenMessageIds.add(messageId);
+  }
 
   let ingested = 0;
   let deduped = 0;
   let parseFailed = 0;
   let fetchFailed = 0;
+  let total = messages.length;
 
   for (const message of messages) {
+    const messageId = normalizeMessageId_(message && typeof message.getId === "function" ? message.getId() : "");
+    if (!messageId) {
+      fetchFailed += 1;
+      outcomes.push({ messageId: "", status: "FETCH_FAILED", reason: "missing_message_id" });
+      debugEntries.push({
+        messageId: "",
+        source: "query",
+        found_in_gmail: true,
+        ingest_http_status: null,
+        ingest_response_error: "missing_message_id",
+        outcome_status: "FETCH_FAILED",
+        outcome_reason: "missing_message_id",
+        processed_at: processedAt
+      });
+      continue;
+    }
     try {
       const outcome = callIngestReceipts_(config, message);
       if (outcome.ok) {
         if (outcome.deduped) {
           deduped += 1;
+          outcomes.push({ messageId, status: "DEDUPED", reason: "already_ingested" });
+          debugEntries.push({
+            messageId,
+            source: "query",
+            found_in_gmail: true,
+            ingest_http_status: outcome.httpStatus ?? null,
+            ingest_response_error: outcome.responseError ?? null,
+            outcome_status: "DEDUPED",
+            outcome_reason: "already_ingested",
+            processed_at: processedAt
+          });
         } else {
           ingested += 1;
+          outcomes.push({ messageId, status: "INGESTED", reason: null });
+          debugEntries.push({
+            messageId,
+            source: "query",
+            found_in_gmail: true,
+            ingest_http_status: outcome.httpStatus ?? null,
+            ingest_response_error: outcome.responseError ?? null,
+            outcome_status: "INGESTED",
+            outcome_reason: null,
+            processed_at: processedAt
+          });
         }
         applyProcessedLabel_(message, label);
         continue;
       }
       if (outcome.parseFailed) {
         parseFailed += 1;
+        outcomes.push({ messageId, status: "PARSE_FAILED", reason: outcome.reason || "parse_failed" });
+        debugEntries.push({
+          messageId,
+          source: "query",
+          found_in_gmail: true,
+          ingest_http_status: outcome.httpStatus ?? null,
+          ingest_response_error: outcome.responseError ?? null,
+          outcome_status: "PARSE_FAILED",
+          outcome_reason: outcome.reason || "parse_failed",
+          processed_at: processedAt
+        });
         applyProcessedLabel_(message, label);
         continue;
       }
       fetchFailed += 1;
+      outcomes.push({ messageId, status: "FETCH_FAILED", reason: outcome.reason || "ingest_failed" });
+      debugEntries.push({
+        messageId,
+        source: "query",
+        found_in_gmail: true,
+        ingest_http_status: outcome.httpStatus ?? null,
+        ingest_response_error: outcome.responseError ?? null,
+        outcome_status: "FETCH_FAILED",
+        outcome_reason: outcome.reason || "ingest_failed",
+        processed_at: processedAt
+      });
     } catch (_) {
       fetchFailed += 1;
+      outcomes.push({ messageId, status: "FETCH_FAILED", reason: "unexpected_error" });
+      debugEntries.push({
+        messageId,
+        source: "query",
+        found_in_gmail: true,
+        ingest_http_status: null,
+        ingest_response_error: "unexpected_error",
+        outcome_status: "FETCH_FAILED",
+        outcome_reason: "unexpected_error",
+        processed_at: processedAt
+      });
+    }
+  }
+
+  for (const forcedMessageId of forcedMessageIds) {
+    if (seenMessageIds.has(forcedMessageId)) {
+      continue;
+    }
+    seenMessageIds.add(forcedMessageId);
+    total += 1;
+    try {
+      const message = GmailApp.getMessageById(forcedMessageId);
+      if (!message) {
+        fetchFailed += 1;
+        outcomes.push({ messageId: forcedMessageId, status: "FETCH_FAILED", reason: "gmail_message_not_found" });
+        debugEntries.push({
+          messageId: forcedMessageId,
+          source: "forced_message_id",
+          found_in_gmail: false,
+          ingest_http_status: null,
+          ingest_response_error: "gmail_message_not_found",
+          outcome_status: "FETCH_FAILED",
+          outcome_reason: "gmail_message_not_found",
+          processed_at: processedAt
+        });
+        continue;
+      }
+      const outcome = callIngestReceipts_(config, message);
+      if (outcome.ok) {
+        if (outcome.deduped) {
+          deduped += 1;
+          outcomes.push({ messageId: forcedMessageId, status: "DEDUPED", reason: "already_ingested" });
+          debugEntries.push({
+            messageId: forcedMessageId,
+            source: "forced_message_id",
+            found_in_gmail: true,
+            ingest_http_status: outcome.httpStatus ?? null,
+            ingest_response_error: outcome.responseError ?? null,
+            outcome_status: "DEDUPED",
+            outcome_reason: "already_ingested",
+            processed_at: processedAt
+          });
+        } else {
+          ingested += 1;
+          outcomes.push({ messageId: forcedMessageId, status: "INGESTED", reason: null });
+          debugEntries.push({
+            messageId: forcedMessageId,
+            source: "forced_message_id",
+            found_in_gmail: true,
+            ingest_http_status: outcome.httpStatus ?? null,
+            ingest_response_error: outcome.responseError ?? null,
+            outcome_status: "INGESTED",
+            outcome_reason: null,
+            processed_at: processedAt
+          });
+        }
+        applyProcessedLabel_(message, label);
+        continue;
+      }
+      if (outcome.parseFailed) {
+        parseFailed += 1;
+        outcomes.push({ messageId: forcedMessageId, status: "PARSE_FAILED", reason: outcome.reason || "parse_failed" });
+        debugEntries.push({
+          messageId: forcedMessageId,
+          source: "forced_message_id",
+          found_in_gmail: true,
+          ingest_http_status: outcome.httpStatus ?? null,
+          ingest_response_error: outcome.responseError ?? null,
+          outcome_status: "PARSE_FAILED",
+          outcome_reason: outcome.reason || "parse_failed",
+          processed_at: processedAt
+        });
+        applyProcessedLabel_(message, label);
+        continue;
+      }
+      fetchFailed += 1;
+      outcomes.push({ messageId: forcedMessageId, status: "FETCH_FAILED", reason: outcome.reason || "ingest_failed" });
+      debugEntries.push({
+        messageId: forcedMessageId,
+        source: "forced_message_id",
+        found_in_gmail: true,
+        ingest_http_status: outcome.httpStatus ?? null,
+        ingest_response_error: outcome.responseError ?? null,
+        outcome_status: "FETCH_FAILED",
+        outcome_reason: outcome.reason || "ingest_failed",
+        processed_at: processedAt
+      });
+    } catch (_) {
+      fetchFailed += 1;
+      outcomes.push({ messageId: forcedMessageId, status: "FETCH_FAILED", reason: "unexpected_error" });
+      debugEntries.push({
+        messageId: forcedMessageId,
+        source: "forced_message_id",
+        found_in_gmail: true,
+        ingest_http_status: null,
+        ingest_response_error: "unexpected_error",
+        outcome_status: "FETCH_FAILED",
+        outcome_reason: "unexpected_error",
+        processed_at: processedAt
+      });
     }
   }
 
   return {
     ok: true,
     query,
-    total: messages.length,
+    total,
     ingested,
     deduped,
     parse_failed: parseFailed,
-    fetch_failed: fetchFailed
+    fetch_failed: fetchFailed,
+    outcomes,
+    bridge_version: "apps-script-bridge-2026-03-18-rerun-debug-v1",
+    supports_outcomes: true,
+    debug_entries: debugEntries
   };
 }
 
@@ -204,7 +398,7 @@ function callIngestReceipts_(config, message) {
   const rawHtml = message.getBody();
   const rawText = message.getPlainBody();
   if (!rawHtml && !rawText) {
-    return { ok: false, deduped: false, parseFailed: false };
+    return { ok: false, deduped: false, parseFailed: false, reason: "empty_body", httpStatus: null, responseError: "empty_body" };
   }
 
   const response = UrlFetchApp.fetch(url, {
@@ -226,12 +420,37 @@ function callIngestReceipts_(config, message) {
   const code = response.getResponseCode();
   const body = safeParseJson_(response.getContentText());
   if (code >= 200 && code < 300) {
-    return { ok: true, deduped: Boolean(body && body.deduped), parseFailed: false };
+    return {
+      ok: true,
+      deduped: Boolean(body && body.deduped),
+      parseFailed: false,
+      reason: Boolean(body && body.deduped) ? "already_ingested" : null,
+      httpStatus: code,
+      responseError: null
+    };
   }
   if (code === 422 && body && body.error === "parse_failed") {
-    return { ok: false, deduped: false, parseFailed: true };
+    return {
+      ok: false,
+      deduped: false,
+      parseFailed: true,
+      reason: "parse_failed",
+      httpStatus: code,
+      responseError: typeof body?.error === "string" ? body.error : "parse_failed"
+    };
   }
-  return { ok: false, deduped: false, parseFailed: false };
+  const reason =
+    body && typeof body.error === "string" && body.error.trim()
+      ? `http_${code}: ${body.error.trim()}`
+      : `http_${code}`;
+  return {
+    ok: false,
+    deduped: false,
+    parseFailed: false,
+    reason,
+    httpStatus: code,
+    responseError: body && typeof body.error === "string" ? body.error : null
+  };
 }
 
 function fetchCandidateMessages_(query, limit) {
@@ -295,10 +514,40 @@ function normalizeLimit_(input, fallback) {
   return Math.max(1, Math.min(numeric, MAX_LIMIT));
 }
 
+function normalizeMessageId_(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim();
+}
+
+function normalizeMessageIds_(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set();
+  for (const entry of value) {
+    const normalized = normalizeMessageId_(entry);
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    if (seen.size >= MAX_LIMIT) {
+      break;
+    }
+  }
+  return Array.from(seen);
+}
+
 function normalizeRunSource_(input) {
   if (input === "ADMIN_MANUAL") return "ADMIN_MANUAL";
   if (input === "API") return "API";
   return "UNKNOWN";
+}
+
+function normalizeRerunMode_(input) {
+  if (input === RERUN_MODE_ROW_MESSAGE) return RERUN_MODE_ROW_MESSAGE;
+  return null;
 }
 
 function readConfig_() {

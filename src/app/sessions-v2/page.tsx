@@ -357,7 +357,7 @@ export default function SessionsV2Page() {
   return (
     <div className={sessionsV2PageClassName} data-render-epoch={renderEpoch}>
       {/* Animated Background */}
-      <AnimatedBackground mobileSafe />
+      <AnimatedBackground />
 
       {/* Confetti Effect */}
       <Confetti trigger={confettiTrigger} originX={confettiOrigin.x} originY={confettiOrigin.y} />

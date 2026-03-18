@@ -6,7 +6,12 @@ import { describe, expect, it, vi } from "vitest";
 type ScriptContext = {
   Logger: { log: ReturnType<typeof vi.fn> };
   UrlFetchApp: { fetch: ReturnType<typeof vi.fn> };
-  runIngestionWithHistory_: (options?: { runSource?: string; query?: string }) => Record<string, unknown>;
+  runIngestionWithHistory_: (options?: {
+    runSource?: string;
+    query?: string;
+    messageIds?: string[];
+    rerunMode?: "ROW_MESSAGE";
+  }) => Record<string, unknown>;
   logIngestionRun_: (input: {
     runSource?: string;
     status: string;
@@ -20,7 +25,22 @@ type ScriptContext = {
     statusCode: number | null;
     error: string | null;
   };
-  processIngestion_: ReturnType<typeof vi.fn>;
+  processIngestion_: (options?: { query?: string; messageIds?: string[]; rerunMode?: "ROW_MESSAGE" }) => Record<string, unknown>;
+  fetchCandidateMessages_: (query: string, limit: number) => unknown[];
+  callIngestReceipts_: (config: unknown, message: unknown) => {
+    ok: boolean;
+    deduped: boolean;
+    parseFailed: boolean;
+    reason?: string | null;
+    httpStatus?: number | null;
+    responseError?: string | null;
+  };
+  GmailApp: {
+    search: ReturnType<typeof vi.fn>;
+    getMessageById: ReturnType<typeof vi.fn>;
+    getUserLabelByName: ReturnType<typeof vi.fn>;
+    createLabel: ReturnType<typeof vi.fn>;
+  };
 };
 
 function loadScript(): ScriptContext {
@@ -48,6 +68,7 @@ function loadScript(): ScriptContext {
     },
     GmailApp: {
       search: vi.fn(() => []),
+      getMessageById: vi.fn(() => null),
       getUserLabelByName: vi.fn(() => ({ getName: () => "club-genie/ingested" })),
       createLabel: vi.fn(() => ({ getName: () => "club-genie/ingested" }))
     },
@@ -91,6 +112,16 @@ function loadScript(): ScriptContext {
 }
 
 describe("gmail Apps Script bridge history logging", () => {
+  function makeMessage(id: string) {
+    const thread = { addLabel: vi.fn() };
+    return {
+      getId: () => id,
+      getBody: () => "<p>receipt</p>",
+      getPlainBody: () => "receipt",
+      getThread: () => thread
+    };
+  }
+
   it("returns log failure details when log-ingestion-run responds non-2xx", () => {
     const context = loadScript();
     context.UrlFetchApp.fetch.mockReturnValue({
@@ -165,5 +196,93 @@ describe("gmail Apps Script bridge history logging", () => {
       history_log_error: null
     });
     expect(context.logIngestionRun_).toHaveBeenCalledTimes(1);
+  });
+
+  it("processes forced message IDs in addition to query matches", () => {
+    const context = loadScript();
+    const queryMessage = makeMessage("query-1");
+    const forcedMessage = makeMessage("forced-1");
+    context.fetchCandidateMessages_ = vi.fn(() => [queryMessage]);
+    context.callIngestReceipts_ = vi.fn((_: unknown, message: unknown) => {
+      const candidate = message as { getId: () => string };
+      if (candidate.getId() === "query-1") {
+        return { ok: true, deduped: false, parseFailed: false };
+      }
+      return { ok: true, deduped: true, parseFailed: false };
+    });
+    context.GmailApp.getMessageById.mockImplementation((id: string) => (id === "forced-1" ? forcedMessage : null));
+
+    const result = context.processIngestion_({
+      query: "subject:test",
+      messageIds: ["forced-1", "query-1", "forced-1"]
+    }) as Record<string, unknown>;
+
+    expect(result.total).toBe(2);
+    expect(result.ingested).toBe(1);
+    expect(result.deduped).toBe(1);
+    expect(result.fetch_failed).toBe(0);
+    expect(result.outcomes).toEqual([
+      { messageId: "query-1", status: "INGESTED", reason: null },
+      { messageId: "forced-1", status: "DEDUPED", reason: "already_ingested" }
+    ]);
+    expect(Array.isArray(result.debug_entries)).toBe(true);
+    expect((result.debug_entries as unknown[]).length).toBe(2);
+    expect(context.GmailApp.getMessageById).toHaveBeenCalledTimes(1);
+    expect(context.GmailApp.getMessageById).toHaveBeenCalledWith("forced-1");
+  });
+
+  it("counts forced ID lookup failures without aborting the run", () => {
+    const context = loadScript();
+    const forcedMessage = makeMessage("forced-fail");
+    context.fetchCandidateMessages_ = vi.fn(() => []);
+    context.callIngestReceipts_ = vi.fn(() => ({ ok: false, deduped: false, parseFailed: false }));
+    context.GmailApp.getMessageById.mockImplementation((id: string) => {
+      if (id === "missing-id") return null;
+      if (id === "boom-id") throw new Error("lookup_failed");
+      if (id === "forced-fail") return forcedMessage;
+      return null;
+    });
+
+    const result = context.processIngestion_({
+      query: "subject:test",
+      messageIds: ["missing-id", "boom-id", "forced-fail", "forced-fail"]
+    }) as Record<string, unknown>;
+
+    expect(result.total).toBe(3);
+    expect(result.ingested).toBe(0);
+    expect(result.deduped).toBe(0);
+    expect(result.parse_failed).toBe(0);
+    expect(result.fetch_failed).toBe(3);
+    expect(result.outcomes).toEqual([
+      { messageId: "missing-id", status: "FETCH_FAILED", reason: "gmail_message_not_found" },
+      { messageId: "boom-id", status: "FETCH_FAILED", reason: "unexpected_error" },
+      { messageId: "forced-fail", status: "FETCH_FAILED", reason: "ingest_failed" }
+    ]);
+    expect(Array.isArray(result.debug_entries)).toBe(true);
+    expect((result.debug_entries as unknown[]).length).toBe(3);
+  });
+
+  it("row rerun mode processes only provided message ids", () => {
+    const context = loadScript();
+    const queryMessage = makeMessage("query-1");
+    const forcedMessage = makeMessage("forced-1");
+    context.fetchCandidateMessages_ = vi.fn(() => [queryMessage]);
+    context.callIngestReceipts_ = vi.fn(() => ({ ok: true, deduped: false, parseFailed: false, reason: null }));
+    context.GmailApp.getMessageById.mockImplementation((id: string) => (id === "forced-1" ? forcedMessage : null));
+
+    const result = context.processIngestion_({
+      query: "subject:test",
+      messageIds: ["forced-1"],
+      rerunMode: "ROW_MESSAGE"
+    }) as Record<string, unknown>;
+
+    expect(result.total).toBe(1);
+    expect(result.ingested).toBe(1);
+    expect(result.deduped).toBe(0);
+    expect(result.outcomes).toEqual([{ messageId: "forced-1", status: "INGESTED", reason: null }]);
+    expect(Array.isArray(result.debug_entries)).toBe(true);
+    expect((result.debug_entries as unknown[]).length).toBe(1);
+    expect(context.fetchCandidateMessages_).not.toHaveBeenCalled();
+    expect(context.GmailApp.getMessageById).toHaveBeenCalledWith("forced-1");
   });
 });

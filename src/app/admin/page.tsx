@@ -6,6 +6,11 @@ import AdminAccountsPanel from "../../components/admin-accounts-panel";
 import AdminNavbar from "../../components/admin-navbar";
 import PlayerAvatarCircle from "../../components/player-avatar-circle";
 import AnimatedBackground from "../../components/v2/AnimatedBackground";
+import {
+  buildSingleEmailRerunPayload,
+  collectNotIngestedMessageIds,
+  isEmailPreviewRerunnable
+} from "../../lib/admin-email-preview-rerun";
 import "../globals-v2.css";
 
 type TabKey = "accounts" | "players" | "club" | "automation" | "emails" | "splitwise";
@@ -95,6 +100,25 @@ type RunHistoryEntry = {
   created_at: string | null;
 };
 
+type EmailRerunOutcomeStatus = "INGESTED" | "DEDUPED" | "PARSE_FAILED" | "FETCH_FAILED";
+
+type EmailRerunOutcome = {
+  messageId: string;
+  status: EmailRerunOutcomeStatus;
+  reason: string | null;
+};
+
+type EmailRerunChip = {
+  status: EmailRerunOutcomeStatus;
+  text: string;
+  tone: "emerald" | "amber" | "rose";
+};
+
+type EmailRerunLog = {
+  summary: string;
+  raw: unknown;
+};
+
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("players");
   const [mounted, setMounted] = useState(false);
@@ -140,6 +164,9 @@ export default function AdminPage() {
     timezone: string | null;
     messages: EmailPreviewMessage[];
   } | null>(null);
+  const [rerunningByMessageId, setRerunningByMessageId] = useState<Record<string, boolean>>({});
+  const [rerunResultByMessageId, setRerunResultByMessageId] = useState<Record<string, EmailRerunChip>>({});
+  const [rerunLogByMessageId, setRerunLogByMessageId] = useState<Record<string, EmailRerunLog>>({});
   const [splitwiseSettings, setSplitwiseSettings] = useState<SplitwiseSettings | null>(null);
   const [splitwiseGroupIdInput, setSplitwiseGroupIdInput] = useState("");
   const [splitwiseCurrencyInput, setSplitwiseCurrencyInput] = useState("SGD");
@@ -464,9 +491,12 @@ export default function AdminPage() {
   const runIngestionNow = async () => {
     setRunningIngestion(true);
     setAutomationMessage(null);
+    const notIngestedMessageIds = collectNotIngestedMessageIds(emailPreview?.messages ?? []);
     const response = await fetch("/api/admin/ingestion/run", {
       method: "POST",
-      credentials: "include"
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(notIngestedMessageIds.length > 0 ? { messageIds: notIngestedMessageIds } : {})
     });
     const data = (await response.json()) as {
       ok: boolean;
@@ -490,14 +520,22 @@ export default function AdminPage() {
       parse_failed: data.parse_failed ?? 0,
       fetch_failed: data.fetch_failed ?? 0
     });
-    setAutomationMessage("Ingestion run completed.");
+    setAutomationMessage(
+      notIngestedMessageIds.length > 0
+        ? `Ingestion run completed. Included ${notIngestedMessageIds.length} preview Not Ingested email(s).`
+        : "Ingestion run completed. No preview Not Ingested emails were included."
+    );
     setRunningIngestion(false);
     await Promise.all([refreshReceiptErrors(), refreshAutomationSettings(), loadAutomationRunHistory()]);
   };
 
-  const loadEmailPreview = async () => {
+  const loadEmailPreview = async (options?: { successMessage?: string; preserveRerunResults?: boolean }) => {
     setLoadingEmailPreview(true);
     setEmailPreviewMessage(null);
+    if (!options?.preserveRerunResults) {
+      setRerunResultByMessageId({});
+      setRerunLogByMessageId({});
+    }
     const query = previewQueryInput.trim();
     const response = await fetch("/api/admin/ingestion/preview", {
       method: "POST",
@@ -523,8 +561,113 @@ export default function AdminPage() {
       timezone: data.timezone ?? null,
       messages: data.messages ?? []
     });
-    setEmailPreviewMessage("Email preview loaded.");
+    setEmailPreviewMessage(options?.successMessage ?? "Email preview loaded.");
     setLoadingEmailPreview(false);
+  };
+
+  const toFetchFailedChip = (reason: string | null | undefined): EmailRerunChip => {
+    const fetchReasonMap: Record<string, string> = {
+      gmail_message_not_found: "Message Not Found",
+      empty_body: "Empty Body",
+      ingest_failed: "Ingest Failed",
+      unexpected_error: "Unexpected Error",
+      missing_outcome: "Missing Outcome"
+    };
+    const normalized = typeof reason === "string" ? reason.trim() : "";
+    const fetchReason = normalized ? fetchReasonMap[normalized] ?? normalized.replaceAll("_", " ") : "";
+    return {
+      status: "FETCH_FAILED",
+      text: `Re-run: Fetch Failed${fetchReason ? ` (${fetchReason})` : ""}`,
+      tone: "rose"
+    };
+  };
+
+  const toEmailRerunChip = (outcome: EmailRerunOutcome): EmailRerunChip => {
+    if (outcome.status === "INGESTED") {
+      return { status: outcome.status, text: "Re-run: Ingested", tone: "emerald" };
+    }
+    if (outcome.status === "DEDUPED") {
+      return { status: outcome.status, text: "Re-run: Already Ingested", tone: "amber" };
+    }
+    if (outcome.status === "PARSE_FAILED") {
+      const reason =
+        outcome.reason && outcome.reason !== "parse_failed" ? ` (${outcome.reason.replaceAll("_", " ")})` : "";
+      return { status: outcome.status, text: `Re-run: Parse Failed${reason}`, tone: "rose" };
+    }
+    return toFetchFailedChip(outcome.reason);
+  };
+
+  const rerunPreviewMessage = async (messageId: string) => {
+    const payload = buildSingleEmailRerunPayload(messageId);
+    if (!payload) {
+      setEmailPreviewMessage("Invalid message id.");
+      return;
+    }
+
+    const normalizedMessageId = payload.messageIds[0]!;
+    setRerunningByMessageId((prev) => ({ ...prev, [normalizedMessageId]: true }));
+    setEmailPreviewMessage(null);
+
+    try {
+      const response = await fetch("/api/admin/ingestion/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload)
+      });
+      const data = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+        outcomes?: EmailRerunOutcome[];
+        debug?: unknown;
+      } | null;
+      if (!data?.ok) {
+        setEmailPreviewMessage(data?.error ?? "Re-run failed.");
+        const chip = toFetchFailedChip(data?.error);
+        setRerunResultByMessageId((prev) => ({ ...prev, [normalizedMessageId]: chip }));
+        setRerunLogByMessageId((prev) => ({
+          ...prev,
+          [normalizedMessageId]: {
+            summary: chip.text,
+            raw: data?.debug ?? { ok: false, error: data?.error ?? "re_run_failed" }
+          }
+        }));
+        return;
+      }
+
+      const outcomes = Array.isArray(data.outcomes) ? data.outcomes : [];
+      const matchedOutcome = outcomes.find((entry) => entry?.messageId?.trim() === normalizedMessageId);
+      const chip = matchedOutcome
+        ? toEmailRerunChip(matchedOutcome)
+        : toFetchFailedChip("missing_outcome");
+      setRerunResultByMessageId((prev) => ({ ...prev, [normalizedMessageId]: chip }));
+      setRerunLogByMessageId((prev) => ({
+        ...prev,
+        [normalizedMessageId]: {
+          summary: chip.text,
+          raw: data.debug ?? { ok: true, outcomes: data.outcomes ?? [] }
+        }
+      }));
+
+      await loadEmailPreview({
+        successMessage: `Re-run completed for ${normalizedMessageId}. Preview refreshed.`,
+        preserveRerunResults: true
+      });
+    } catch (error) {
+      const message = error instanceof Error && error.message.trim() ? error.message.trim() : "unexpected_error";
+      setEmailPreviewMessage("Re-run failed.");
+      const chip = toFetchFailedChip(message);
+      setRerunResultByMessageId((prev) => ({ ...prev, [normalizedMessageId]: chip }));
+      setRerunLogByMessageId((prev) => ({
+        ...prev,
+        [normalizedMessageId]: {
+          summary: chip.text,
+          raw: { ok: false, error: message }
+        }
+      }));
+    } finally {
+      setRerunningByMessageId((prev) => ({ ...prev, [normalizedMessageId]: false }));
+    }
   };
 
   const handleAddPlayer = async () => {
@@ -1910,7 +2053,7 @@ export default function AdminPage() {
               </label>
               <button
                 type="button"
-                onClick={loadEmailPreview}
+                onClick={() => loadEmailPreview()}
                 disabled={loadingEmailPreview}
                 className="md:justify-self-start rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"
               >
@@ -1956,7 +2099,11 @@ export default function AdminPage() {
               <p className="mt-4 text-sm text-slate-500">No matching messages found.</p>
             ) : (
               <ul className="mt-4 space-y-4">
-                {filteredEmailPreviewMessages.map((message) => (
+                {filteredEmailPreviewMessages.map((message) => {
+                  const rerunMessageId = message.id.trim();
+                  const rerunChip = rerunResultByMessageId[rerunMessageId] ?? null;
+                  const rerunLog = rerunLogByMessageId[rerunMessageId] ?? null;
+                  return (
                   <li key={message.id} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200/80 p-4 dark:border-ink-700/60">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="break-all font-semibold">{message.id}</p>
@@ -1979,6 +2126,16 @@ export default function AdminPage() {
                           ? "Ingested, No Session"
                           : "Not Ingested"}
                       </span>
+                      {isEmailPreviewRerunnable(message.status) ? (
+                        <button
+                          type="button"
+                          onClick={() => rerunPreviewMessage(rerunMessageId)}
+                          disabled={Boolean(rerunningByMessageId[rerunMessageId]) || loadingEmailPreview}
+                          className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100 disabled:opacity-60"
+                        >
+                          {rerunningByMessageId[rerunMessageId] ? "Running..." : "Re-run"}
+                        </button>
+                      ) : null}
                     </div>
                     <p className="mt-1 text-xs text-slate-400">
                       text={message.textLength}
@@ -1992,6 +2149,28 @@ export default function AdminPage() {
                       </p>
                     ) : null}
                     {message.parseError ? <p className="mt-1 text-xs text-rose-500">{message.parseError}</p> : null}
+                    {rerunChip ? (
+                      <p
+                        className={`mt-1 text-xs font-semibold ${
+                          rerunChip.tone === "emerald"
+                            ? "text-emerald-600 dark:text-emerald-300"
+                            : rerunChip.tone === "amber"
+                            ? "text-amber-700 dark:text-amber-300"
+                            : "text-rose-600 dark:text-rose-300"
+                        }`}
+                      >
+                        {rerunChip.text}
+                      </p>
+                    ) : null}
+                    {rerunLog ? (
+                      <details className="mt-2 min-w-0 rounded-xl border border-slate-200/80 p-2 dark:border-ink-700/60">
+                        <summary className="cursor-pointer text-xs font-semibold">Re-run Log</summary>
+                        <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">{rerunLog.summary}</p>
+                        <pre className="mt-2 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-xl border border-slate-200/80 bg-slate-100 p-3 text-xs dark:border-ink-700/60 dark:bg-ink-900/40">
+                          {JSON.stringify(rerunLog.raw, null, 2)}
+                        </pre>
+                      </details>
+                    ) : null}
                     <details className="mt-3 min-w-0">
                       <summary className="cursor-pointer text-sm font-semibold">Text Body</summary>
                       <pre className="mt-2 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-xl border border-slate-200/80 bg-slate-100 p-3 text-xs dark:border-ink-700/60 dark:bg-ink-900/40">
@@ -2005,7 +2184,8 @@ export default function AdminPage() {
                       </pre>
                     </details>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </div>

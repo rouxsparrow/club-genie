@@ -38,6 +38,7 @@
    ======================================== */
 
 .v2-page {
+  position: relative;
   min-height: 100vh;
   background: var(--v2-bg-deep);
   color: var(--v2-text-primary);
@@ -145,13 +146,6 @@
   top: 50%;
   left: 50%;
   animation-delay: -10s;
-}
-
-.v2-mesh-bg-static .v2-mesh-gradient-static {
-  inset: 0;
-  opacity: 0.52;
-  animation: none;
-  transform: none;
 }
 
 @keyframes meshFloat {
@@ -967,10 +961,10 @@
    ======================================== */
 
 .v2-confetti-canvas {
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 10000;
+  z-index: 12;
 }
 
 /* ========================================
@@ -2052,36 +2046,6 @@
     isolation: isolate;
     contain: paint;
     will-change: auto;
-  }
-
-  .v2-ios-safari-safe .v2-mesh-gradient {
-    animation: none !important;
-    opacity: 0.5;
-    transform: none !important;
-    backface-visibility: hidden;
-    -webkit-backface-visibility: hidden;
-  }
-
-  .v2-ios-safari-safe .v2-mesh-blob {
-    display: none;
-    animation: none !important;
-    filter: none !important;
-  }
-
-  .v2-ios-safari-safe .v2-mesh-bg-static {
-    position: absolute;
-    inset: 0;
-  }
-
-  .v2-ios-safari-safe .v2-mesh-bg-static .v2-mesh-gradient-static {
-    inset: 0;
-    opacity: 0.48;
-    animation: none !important;
-    transform: none !important;
-  }
-
-  .v2-ios-safari-safe .v2-mesh-bg-static .v2-mesh-grid {
-    opacity: 0.018;
   }
 
   .v2-ios-safari-safe .v2-dialog-overlay,

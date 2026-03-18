@@ -729,7 +729,7 @@ export default function SessionsClient() {
   if (gateState === "error") {
     return (
       <div className={sessionsPageClassName} data-render-epoch={renderEpoch}>
-        <AnimatedBackground mobileSafe />
+        <AnimatedBackground />
         <main className="v2-container">
           <header className="v2-header !px-0 pt-6">
             <div className="v2-logo">
@@ -757,7 +757,7 @@ export default function SessionsClient() {
   if (gateState !== "allowed") {
     return (
       <div className={sessionsPageClassName} data-render-epoch={renderEpoch}>
-        <AnimatedBackground mobileSafe />
+        <AnimatedBackground />
         <main className="v2-container" />
       </div>
     );
@@ -766,7 +766,7 @@ export default function SessionsClient() {
   if (!mounted || loading) {
     return (
       <div className={sessionsPageClassName} data-render-epoch={renderEpoch}>
-        <AnimatedBackground mobileSafe />
+        <AnimatedBackground />
         <main className="v2-container">
           <header className="v2-header !px-0 pt-6">
             <div className="v2-logo">
@@ -793,7 +793,7 @@ export default function SessionsClient() {
 
   return (
     <div className={sessionsPageClassName} data-render-epoch={renderEpoch}>
-      <AnimatedBackground mobileSafe />
+      <AnimatedBackground />
       <Confetti trigger={confettiTrigger} originX={confettiOrigin.x} originY={confettiOrigin.y} />
 
       <main className="v2-container">

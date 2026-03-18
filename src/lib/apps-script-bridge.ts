@@ -3,6 +3,8 @@ type BridgeAction = "manual_ingest" | "preview";
 type BridgePayload = {
   query?: string;
   limit?: number;
+  messageIds?: string[];
+  rerunMode?: "ROW_MESSAGE";
 };
 
 type BridgeResponse = {

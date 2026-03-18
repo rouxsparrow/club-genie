@@ -1,37 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 
-type AnimatedBackgroundProps = {
-  mobileSafe?: boolean;
-};
-
-export default function AnimatedBackground({ mobileSafe = false }: AnimatedBackgroundProps) {
-  const [isCoarsePointer, setIsCoarsePointer] = useState(false);
-
-  useEffect(() => {
-    if (!mobileSafe || typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mediaQuery = window.matchMedia("(hover: none) and (pointer: coarse)");
-    const syncMode = () => setIsCoarsePointer(mediaQuery.matches);
-    syncMode();
-    if (typeof mediaQuery.addEventListener === "function") {
-      mediaQuery.addEventListener("change", syncMode);
-      return () => mediaQuery.removeEventListener("change", syncMode);
-    }
-    mediaQuery.addListener(syncMode);
-    return () => mediaQuery.removeListener(syncMode);
-  }, [mobileSafe]);
-
-  if (mobileSafe && isCoarsePointer) {
-    return (
-      <div className="v2-mesh-bg v2-mesh-bg-static" aria-hidden="true">
-        <div className="v2-mesh-gradient v2-mesh-gradient-static" />
-        <div className="v2-mesh-grid" />
-      </div>
-    );
-  }
-
+export default function AnimatedBackground() {
   return (
     <div className="v2-mesh-bg" aria-hidden="true">
       {/* Animated gradient overlay */}

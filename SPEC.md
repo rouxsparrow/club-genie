@@ -39,6 +39,8 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Admin can rotate the club access token and share a new invite link.
 - Admin can view the current club access token/link from DB (not browser localStorage).
 - Admin can preview raw Gmail receipt bodies (text/HTML) in the Automation area via the Apps Script bridge for parser debugging.
+- Admin Email Preview rows show a per-email `Re-run` action for `Not Ingested` messages; rerun ingests only that Gmail message (no bulk query scan), auto-refreshes preview using the current query override, and shows inline per-row rerun outcome (`Ingested`, `Already Ingested`, `Parse Failed`, `Fetch Failed`).
+- Admin Email Preview cards show inline `Re-run Log` details (summary + raw debug JSON) for the latest rerun attempt on that message.
 - Admin can query ingestion and Splitwise automation run history (cron/manual source, status, summary, errors) from Admin tabs.
 - Apps Script ingestion writes run summaries into `automation_run_history` so Admin history remains available after scheduler migration.
 - Admin can keep legacy Gmail OAuth config (`client_id`, `client_secret`, `refresh_token`) in Supabase for rollback only.
@@ -77,7 +79,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Idempotent cron jobs and safe re-runs.
 - Hosted on Vercel free tier with Postgres-compatible DB.
 - Basic security: least-privilege API access and admin-only actions.
-- Mobile browser rendering stability on Sessions views is prioritized over animation parity; coarse-pointer mobile devices use a static mesh background fallback (no blur-blob motion) to prevent black-layer artifacts after lock/app-switch resume while preserving V2 branding.
+- Mobile browser rendering stability on Sessions views is prioritized while preserving visual parity: coarse-pointer mobile devices keep the animated V2 background and confetti effect, with confetti rendered as a short-lived page-scoped burst overlay (not persistent fixed canvas) to reduce compositor risk.
 
 ## Acceptance Criteria
 - Scheduled Apps Script trigger creates/updates sessions from new receipts.

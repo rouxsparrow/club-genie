@@ -22,8 +22,8 @@
 - Public read/write flows continue to require `x-club-token`.
 
 ## Splitwise Integration Boundary
-- Session closing triggers a Splitwise expense with equal split, admin as payer.
-- The resulting `splitwise_expense_id` is stored to ensure idempotency.
+- Session closing triggers Splitwise sync that can create two expenses per session (`COURT`, optional `SHUTTLECOCK`).
+- Idempotency is tracked locally per `(session_id, expense_type)` and each created expense stores `splitwise_expense_id`.
 
 ## Milestone Delivery Plan
 - M1 Automation: DB schema, Gmail parsing contract, ingestion + session creation cron.

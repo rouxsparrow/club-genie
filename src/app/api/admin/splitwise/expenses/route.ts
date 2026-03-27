@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   let query = supabaseAdmin
     .from("expenses")
     .select(
-      "id,session_id,splitwise_expense_id,amount,status,last_error,updated_at,created_at,session:sessions(id,session_date,status,splitwise_status,location)"
+      "id,session_id,expense_type,splitwise_expense_id,amount,status,last_error,request_payload,updated_at,created_at,session:sessions(id,session_date,status,splitwise_status,location)"
     )
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -25,6 +25,18 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, records: data ?? [] });
-}
+  const records = (data ?? []).map((row) => {
+    const record = row as Record<string, unknown>;
+    const requestPayload =
+      record.request_payload && typeof record.request_payload === "object"
+        ? (record.request_payload as Record<string, unknown>)
+        : null;
+    const note = requestPayload && typeof requestPayload.details === "string" ? requestPayload.details : null;
+    return {
+      ...record,
+      note
+    };
+  });
 
+  return NextResponse.json({ ok: true, records });
+}

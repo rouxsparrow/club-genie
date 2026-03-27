@@ -14,6 +14,7 @@ function normalizePlayerRow(row: unknown) {
     ...record,
     splitwise_user_id: typeof record.splitwise_user_id === "number" ? record.splitwise_user_id : null,
     is_default_payer: typeof record.is_default_payer === "boolean" ? record.is_default_payer : false,
+    shuttlecock_paid: typeof record.shuttlecock_paid === "boolean" ? record.shuttlecock_paid : false,
     avatar_path: avatarPath,
     avatar_url: avatarPathToPublicUrl(process.env.SUPABASE_URL, avatarPath)
   };
@@ -27,6 +28,8 @@ function getAvatarPathFromRow(row: unknown) {
 
 async function fetchPlayerById(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>, id: string) {
   const selectCandidates = [
+    "id,name,active,splitwise_user_id,is_default_payer,shuttlecock_paid,avatar_path",
+    "id,name,active,splitwise_user_id,is_default_payer,shuttlecock_paid",
     "id,name,active,splitwise_user_id,is_default_payer,avatar_path",
     "id,name,active,splitwise_user_id,is_default_payer",
     "id,name,active,avatar_path",
@@ -36,7 +39,12 @@ async function fetchPlayerById(supabaseAdmin: ReturnType<typeof getSupabaseAdmin
   let query = await supabaseAdmin.from("players").select(selectCandidates[0] as string).eq("id", id).maybeSingle();
   for (let i = 1; i < selectCandidates.length && query.error; i += 1) {
     const message = query.error.message ?? "";
-    if (!message.includes("splitwise_user_id") && !message.includes("is_default_payer") && !message.includes("avatar_path")) {
+    if (
+      !message.includes("splitwise_user_id") &&
+      !message.includes("is_default_payer") &&
+      !message.includes("shuttlecock_paid") &&
+      !message.includes("avatar_path")
+    ) {
       break;
     }
     query = await supabaseAdmin.from("players").select(selectCandidates[i] as string).eq("id", id).maybeSingle();

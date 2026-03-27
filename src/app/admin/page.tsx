@@ -21,6 +21,7 @@ type Player = {
   active: boolean;
   splitwise_user_id?: number | null;
   is_default_payer?: boolean;
+  shuttlecock_paid?: boolean;
   avatar_path?: string | null;
   avatar_url?: string | null;
 };
@@ -36,6 +37,7 @@ type SplitwiseSettings = {
   group_id: number;
   currency_code: string;
   enabled: boolean;
+  shuttlecock_fee?: number;
   description_template?: string;
   date_format?: string;
   location_replacements?: Array<{ from: string; to: string }>;
@@ -171,6 +173,7 @@ export default function AdminPage() {
   const [splitwiseGroupIdInput, setSplitwiseGroupIdInput] = useState("");
   const [splitwiseCurrencyInput, setSplitwiseCurrencyInput] = useState("SGD");
   const [splitwiseEnabled, setSplitwiseEnabled] = useState(true);
+  const [splitwiseShuttlecockFeeInput, setSplitwiseShuttlecockFeeInput] = useState("4.00");
   const [splitwiseDescriptionTemplate, setSplitwiseDescriptionTemplate] = useState("Badminton {session_date} - {location}");
   const [splitwiseDateFormat, setSplitwiseDateFormat] = useState<"DD/MM/YY" | "YYYY-MM-DD">("DD/MM/YY");
   const [splitwiseLocationMappingsText, setSplitwiseLocationMappingsText] = useState("Club Sbh East Coast @ Expo => Expo");
@@ -204,10 +207,12 @@ export default function AdminPage() {
     Array<{
       id: string;
       session_id: string;
+      expense_type?: "COURT" | "SHUTTLECOCK" | null;
       splitwise_expense_id: string | null;
       amount: number | null;
       status: string | null;
       last_error: string | null;
+      note?: string | null;
       updated_at: string | null;
       created_at: string | null;
       session?: { id: string; session_date: string; status: string | null; splitwise_status: string | null; location: string | null } | null;
@@ -324,6 +329,11 @@ export default function AdminPage() {
           setSplitwiseGroupIdInput(String(splitwisePayload.settings.group_id ?? 0));
           setSplitwiseCurrencyInput(splitwisePayload.settings.currency_code ?? "SGD");
           setSplitwiseEnabled(Boolean(splitwisePayload.settings.enabled));
+          setSplitwiseShuttlecockFeeInput(
+            typeof splitwisePayload.settings.shuttlecock_fee === "number"
+              ? splitwisePayload.settings.shuttlecock_fee.toFixed(2)
+              : "4.00"
+          );
           setSplitwiseGroupDetailIdInput(String(splitwisePayload.settings.group_id ?? 0));
           setSplitwiseDescriptionTemplate(
             (typeof splitwisePayload.settings.description_template === "string" && splitwisePayload.settings.description_template.trim()
@@ -794,6 +804,23 @@ export default function AdminPage() {
     setActionMessage(enabled ? "Default payer updated." : "Default payer cleared.");
   };
 
+  const setPlayerShuttlecockPaid = async (playerId: string, enabled: boolean) => {
+    setActionMessage(null);
+    const response = await fetch(`/api/admin/players/${playerId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ shuttlecockPaid: enabled })
+    });
+    const data = (await response.json().catch(() => null)) as { ok?: boolean; player?: Player; error?: string } | null;
+    if (!data?.ok || !data.player) {
+      setActionMessage(data?.error ?? "Failed to update shuttlecock setting.");
+      return;
+    }
+    updatePlayerInState(data.player);
+    setActionMessage("Shuttlecock paid updated.");
+  };
+
   const uploadPlayerAvatar = async (playerId: string) => {
     const file = avatarFileDrafts[playerId];
     if (!file) {
@@ -867,6 +894,7 @@ export default function AdminPage() {
         groupId: splitwiseGroupIdInput,
         currencyCode: splitwiseCurrencyInput,
         enabled: splitwiseEnabled,
+        shuttlecockFee: splitwiseShuttlecockFeeInput,
         descriptionTemplate: splitwiseDescriptionTemplate,
         dateFormat: splitwiseDateFormat,
         locationReplacements
@@ -881,6 +909,9 @@ export default function AdminPage() {
     setSplitwiseGroupIdInput(String(data.settings.group_id ?? 0));
     setSplitwiseCurrencyInput(data.settings.currency_code ?? "SGD");
     setSplitwiseEnabled(Boolean(data.settings.enabled));
+    setSplitwiseShuttlecockFeeInput(
+      typeof data.settings.shuttlecock_fee === "number" ? data.settings.shuttlecock_fee.toFixed(2) : "4.00"
+    );
     setSplitwiseGroupDetailIdInput(String(data.settings.group_id ?? 0));
     setSplitwiseDescriptionTemplate(
       (typeof data.settings.description_template === "string" && data.settings.description_template.trim()
@@ -1009,13 +1040,13 @@ export default function AdminPage() {
     setLoadingSplitwiseRecords(false);
   };
 
-  const deleteSplitwiseRecord = async (sessionId: string) => {
+  const deleteSplitwiseRecord = async (expenseId: string) => {
     setSplitwiseMessage(null);
     const confirmed = window.confirm(
-      "Delete this Splitwise record from our DB?\n\nIf the record was already created in Splitwise, we will keep the session status as CREATED to avoid duplicates."
+      "Delete this Splitwise record from our DB?\n\nSession splitwise_status will be recomputed from remaining records for that session."
     );
     if (!confirmed) return;
-    const response = await fetch(`/api/admin/splitwise/expenses/${sessionId}`, {
+    const response = await fetch(`/api/admin/splitwise/expenses/${expenseId}`, {
       method: "DELETE",
       credentials: "include"
     });
@@ -1383,6 +1414,15 @@ export default function AdminPage() {
                                     />
                                     Default payer
                                   </label>
+                                  <label className="flex items-center gap-2 font-semibold">
+                                    <input
+                                      name={`shuttlecock_paid_${player.id}`}
+                                      type="checkbox"
+                                      checked={Boolean(player.shuttlecock_paid)}
+                                      onChange={(event) => setPlayerShuttlecockPaid(player.id, event.target.checked)}
+                                    />
+                                    Shuttlecock paid
+                                  </label>
                                 </div>
                               </div>
                             ) : null}
@@ -1720,7 +1760,7 @@ export default function AdminPage() {
             {loadingSplitwise ? (
               <p className="mt-4 text-sm text-slate-500">Loading Splitwise settings...</p>
             ) : (
-              <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <div className="mt-4 grid gap-4 md:grid-cols-4">
                 <label className="text-sm font-semibold">
                   Group ID
                   <input
@@ -1749,6 +1789,19 @@ export default function AdminPage() {
                     onChange={(event) => setSplitwiseEnabled(event.target.checked)}
                   />
                   Enabled
+                </label>
+                <label className="text-sm font-semibold">
+                  Shuttlecock Fee
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={splitwiseShuttlecockFeeInput}
+                    onChange={(event) => setSplitwiseShuttlecockFeeInput(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                    placeholder="4.00"
+                  />
                 </label>
               </div>
             )}
@@ -2043,9 +2096,11 @@ export default function AdminPage() {
                       <tr>
                         <th className="px-4 py-3">Session</th>
                         <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3">Type</th>
                         <th className="px-4 py-3">Status</th>
                         <th className="px-4 py-3">Splitwise ID</th>
                         <th className="px-4 py-3">Amount</th>
+                        <th className="px-4 py-3">Note</th>
                         <th className="px-4 py-3">Last Error</th>
                         <th className="px-4 py-3">Actions</th>
                       </tr>
@@ -2065,23 +2120,27 @@ export default function AdminPage() {
                               ) : null}
                             </td>
                             <td className="px-4 py-3">{row.session?.session_date ?? "-"}</td>
+                            <td className="px-4 py-3">{row.expense_type ?? "COURT"}</td>
                             <td className="px-4 py-3">{row.status ?? "-"}</td>
                             <td className="px-4 py-3">
                               {row.splitwise_expense_id ? <code className="text-xs">{row.splitwise_expense_id}</code> : "-"}
                             </td>
                             <td className="px-4 py-3">{typeof row.amount === "number" ? row.amount.toFixed(2) : "-"}</td>
                             <td className="px-4 py-3">
+                              {row.note ? <pre className="whitespace-pre-wrap text-xs text-slate-500 dark:text-slate-300">{row.note}</pre> : "-"}
+                            </td>
+                            <td className="px-4 py-3">
                               {row.last_error ? <span className="text-xs text-rose-600">{row.last_error}</span> : "-"}
                             </td>
                             <td className="px-4 py-3">
                               <button
                                 type="button"
-                                onClick={() => deleteSplitwiseRecord(sessionId)}
+                                onClick={() => deleteSplitwiseRecord(row.id)}
                                 className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 disabled:opacity-50 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200"
                                 title={
                                   isCreatedWithRemoteId
-                                    ? "Delete local record only. Session stays CREATED to avoid duplicate expenses."
-                                    : "Delete local record and reset session to PENDING."
+                                    ? "Delete local record only. Session status is recomputed from remaining records."
+                                    : "Delete local record and recompute session status."
                                 }
                               >
                                 Delete

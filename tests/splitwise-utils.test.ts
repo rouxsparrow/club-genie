@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCourtExpenseNote,
+  buildShuttlecockExpenseNote,
   buildSplitwiseBySharesPayload,
+  buildSplitwiseShuttlecockPayload,
   centsToMoneyString,
   computeSgtDateWindowLast24h,
   parseMoneyToCents,
@@ -156,5 +159,125 @@ describe("splitwise utils", () => {
         }
       )
     ).toBe("Badminton 01/02/26 - Expo");
+  });
+
+  it("builds shuttlecock payload for OFF participants and ON recipients", () => {
+    const built = buildSplitwiseShuttlecockPayload({
+      groupId: 11,
+      currencyCode: "SGD",
+      description: "Shuttlecock 2026-03-01",
+      dateIso: "2026-03-01T14:00:00.000Z",
+      participantOffUserIds: [10, 20, 30],
+      recipientOnUserIds: [100, 200],
+      perOffFeeCents: 400,
+      sessionPayerUserId: 10
+    });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+
+    const payload = built.payload as Record<string, unknown>;
+    expect(payload.cost).toBe("12.00");
+    // Recipients receive the collected amount via paid_share.
+    expect(payload["users__3__user_id"]).toBe(100);
+    expect(payload["users__3__paid_share"]).toBe("6.00");
+    expect(payload["users__3__owed_share"]).toBe("0.00");
+    expect(payload["users__4__user_id"]).toBe(200);
+    expect(payload["users__4__paid_share"]).toBe("6.00");
+    expect(payload["users__4__owed_share"]).toBe("0.00");
+    // OFF users each owe 4.00.
+    expect(payload["users__0__owed_share"]).toBe("4.00");
+    expect(payload["users__1__owed_share"]).toBe("4.00");
+    expect(payload["users__2__owed_share"]).toBe("4.00");
+  });
+
+  it("distributes shuttlecock recipient remainder deterministically by sorted user id", () => {
+    const built = buildSplitwiseShuttlecockPayload({
+      groupId: 11,
+      currencyCode: "SGD",
+      description: "Shuttlecock remainder",
+      dateIso: "2026-03-01T14:00:00.000Z",
+      participantOffUserIds: [2],
+      recipientOnUserIds: [30, 10, 20],
+      perOffFeeCents: 100,
+      sessionPayerUserId: 2
+    });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const payload = built.payload as Record<string, unknown>;
+    // Sorted recipient ids are 10,20,30 => 0.34, 0.33, 0.33.
+    expect(payload["users__1__user_id"]).toBe(10);
+    expect(payload["users__1__paid_share"]).toBe("0.34");
+    expect(payload["users__2__user_id"]).toBe(20);
+    expect(payload["users__2__paid_share"]).toBe("0.33");
+    expect(payload["users__3__user_id"]).toBe(30);
+    expect(payload["users__3__paid_share"]).toBe("0.33");
+  });
+
+  it("returns skip-style errors for shuttlecock payload with no OFF or no ON", () => {
+    const noOff = buildSplitwiseShuttlecockPayload({
+      groupId: 11,
+      currencyCode: "SGD",
+      description: "Shuttlecock",
+      dateIso: "2026-03-01T14:00:00.000Z",
+      participantOffUserIds: [],
+      recipientOnUserIds: [100],
+      perOffFeeCents: 400,
+      sessionPayerUserId: 100
+    });
+    expect(noOff.ok).toBe(false);
+    if (!noOff.ok) expect(noOff.error).toBe("no_charge");
+
+    const noOn = buildSplitwiseShuttlecockPayload({
+      groupId: 11,
+      currencyCode: "SGD",
+      description: "Shuttlecock",
+      dateIso: "2026-03-01T14:00:00.000Z",
+      participantOffUserIds: [100],
+      recipientOnUserIds: [],
+      perOffFeeCents: 400,
+      sessionPayerUserId: 100
+    });
+    expect(noOn.ok).toBe(false);
+    if (!noOn.ok) expect(noOn.error).toBe("missing_recipients");
+  });
+
+  it("charges guest shuttlecock shares to session payer", () => {
+    const built = buildSplitwiseShuttlecockPayload({
+      groupId: 11,
+      currencyCode: "SGD",
+      description: "Shuttlecock guests",
+      dateIso: "2026-03-01T14:00:00.000Z",
+      participantOffUserIds: [10, 20],
+      recipientOnUserIds: [100, 200],
+      perOffFeeCents: 400,
+      guestCount: 2,
+      sessionPayerUserId: 10
+    });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.totalCostCents).toBe(1600);
+    const payload = built.payload as Record<string, unknown>;
+    // Payer owes own OFF fee + 2 guest shares => 12.00.
+    expect(payload["users__0__user_id"]).toBe(10);
+    expect(payload["users__0__owed_share"]).toBe("12.00");
+    expect(payload["users__1__owed_share"]).toBe("4.00");
+  });
+
+  it("creates note strings for court and shuttlecock", () => {
+    const courtNote = buildCourtExpenseNote({
+      totalCostCents: 8800,
+      joinedPlayersCount: 8,
+      guestCount: 2,
+      sessionPayerLabel: "Alex"
+    });
+    expect(courtNote).toBe("Total: 88.00\nJoined players: 8, Guests: 2\nSession payer: Alex");
+
+    const shuttleNote = buildShuttlecockExpenseNote({
+      totalCostCents: 1600,
+      shuttleOffPlayersCount: 2,
+      guestCount: 2,
+      sessionPayerLabel: "Alex"
+    });
+    expect(shuttleNote).toBe("Total: 16.00\nShuttle OFF players: 2, Guests: 2\nSession payer: Alex");
   });
 });

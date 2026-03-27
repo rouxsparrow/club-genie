@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../../../../lib/supabase/admin";
 
 export async function DELETE(_request: Request, context: { params: Promise<{ sessionId: string }> }) {
-  const { sessionId } = await context.params;
-  const id = (sessionId ?? "").trim();
-  if (!id) {
-    return NextResponse.json({ ok: false, error: "Missing session id." }, { status: 400 });
+  const { sessionId: rawExpenseId } = await context.params;
+  const expenseId = (rawExpenseId ?? "").trim();
+  if (!expenseId) {
+    return NextResponse.json({ ok: false, error: "Missing expense id." }, { status: 400 });
   }
 
   const supabaseAdmin = getSupabaseAdmin();
@@ -13,7 +13,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ ses
   const { data: expense, error: lookupError } = await supabaseAdmin
     .from("expenses")
     .select("id,session_id,status,splitwise_expense_id")
-    .eq("session_id", id)
+    .eq("id", expenseId)
     .maybeSingle();
 
   if (lookupError) {
@@ -23,21 +23,38 @@ export async function DELETE(_request: Request, context: { params: Promise<{ ses
     return NextResponse.json({ ok: false, error: "Splitwise record not found." }, { status: 404 });
   }
 
-  const status = typeof expense.status === "string" ? expense.status : "";
-  const splitwiseId = typeof expense.splitwise_expense_id === "string" && expense.splitwise_expense_id.trim() ? expense.splitwise_expense_id.trim() : null;
+  const sessionId = typeof expense.session_id === "string" ? expense.session_id : "";
+  if (!sessionId) {
+    return NextResponse.json({ ok: false, error: "Splitwise record missing session link." }, { status: 500 });
+  }
 
-  const { error: deleteError } = await supabaseAdmin.from("expenses").delete().eq("session_id", id);
+  const { error: deleteError } = await supabaseAdmin.from("expenses").delete().eq("id", expenseId);
   if (deleteError) {
     return NextResponse.json({ ok: false, error: deleteError.message }, { status: 500 });
   }
 
-  // If this expense was already created in Splitwise, keep session as CREATED to avoid duplicate creation.
-  // Otherwise, reset to PENDING so it can be retried.
-  const nextStatus = status === "CREATED" && splitwiseId ? "CREATED" : "PENDING";
+  const { data: remaining, error: remainingError } = await supabaseAdmin
+    .from("expenses")
+    .select("status,splitwise_expense_id")
+    .eq("session_id", sessionId);
+  if (remainingError) {
+    return NextResponse.json({ ok: false, error: remainingError.message }, { status: 500 });
+  }
+
+  const rows = Array.isArray(remaining) ? remaining : [];
+  const hasCreated = rows.some(
+    (row) =>
+      row?.status === "CREATED" &&
+      typeof row?.splitwise_expense_id === "string" &&
+      row.splitwise_expense_id.trim().length > 0
+  );
+  const hasFailed = rows.some((row) => row?.status === "FAILED");
+  const nextStatus = hasFailed ? "FAILED" : hasCreated ? "CREATED" : "PENDING";
+
   await supabaseAdmin
     .from("sessions")
     .update({ splitwise_status: nextStatus, updated_at: new Date().toISOString() })
-    .eq("id", id);
+    .eq("id", sessionId);
 
   return NextResponse.json({ ok: true });
 }

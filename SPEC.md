@@ -54,6 +54,11 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Sessions page location display removes a leading `Club` prefix for readability (display-only; stored value unchanged).
 - Sessions page court display removes a leading `Court` prefix and shows compact time ranges (for example, `P2 (5-6PM)`), display-only.
 - Splitwise share math includes guest shares and assigns those guest shares to the resolved session payer.
+- Players include a `shuttlecock_paid` flag for Splitwise shuttlecock redistribution logic.
+- Splitwise sync creates up to two expenses per CLOSED session: `COURT` (normal court fee) and optional `SHUTTLECOCK`.
+- Splitwise `SHUTTLECOCK` expense charges each session participant with `shuttlecock_paid=false` plus session guest shares (guest shares assigned to session payer) using a configurable per-session shuttlecock fee, then redistributes that total across all active players with `shuttlecock_paid=true` and valid Splitwise mapping.
+- Shuttlecock fee amount is configurable in Admin Splitwise settings (`splitwise_settings.shuttlecock_fee`, default `4.00`).
+- Splitwise expense payload includes multi-line `details` notes for audit context (totals, counts, resolved session payer), and Admin Splitwise Records expose that note from local stored payload.
 
 ## Access Model
 - A single club-level access token is embedded in the shared link once and stored in localStorage.
@@ -87,4 +92,4 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Parse failures are visible in the in-app admin error queue.
 - Public registration flows allow join/withdraw for multiple players.
 - Admin actions are restricted and audited for session edits and closures.
-- Splitwise expenses are recorded once per session and retries are safe.
+- Splitwise expenses are recorded idempotently per session + expense type (`COURT`, `SHUTTLECOCK`) and retries are safe.

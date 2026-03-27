@@ -4,7 +4,7 @@
 - sessions.session_date UNIQUE
 - session_participants UNIQUE(session_id, player_id)
 - email_receipts.gmail_message_id UNIQUE
-- expenses.session_id UNIQUE
+- expenses UNIQUE(session_id, expense_type)
 - players.name UNIQUE
 
 ## Suggested Indexes

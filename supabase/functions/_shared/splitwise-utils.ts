@@ -6,6 +6,13 @@ export type SplitwiseShareRow = {
   owedShareCents: number;
 };
 
+export type ShuttlecockShareRow = SplitwiseShareRow;
+
+function trimOrNull(value: string | null | undefined) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized || null;
+}
+
 function escapeRegexLiteral(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -185,4 +192,112 @@ export function buildSplitwiseBySharesPayload(input: {
   });
 
   return { ok: true as const, payload, shares };
+}
+
+export function buildSplitwiseShuttlecockPayload(input: {
+  groupId: number;
+  currencyCode: string;
+  description: string;
+  dateIso: string;
+  participantOffUserIds: number[];
+  recipientOnUserIds: number[];
+  perOffFeeCents: number;
+  guestCount?: number;
+  sessionPayerUserId: number;
+}) {
+  const offUsers = [...new Set(input.participantOffUserIds)].sort((a, b) => a - b);
+  if (!Number.isInteger(input.perOffFeeCents) || input.perOffFeeCents <= 0) {
+    return { ok: false as const, error: "invalid_fee" };
+  }
+  if (!Number.isInteger(input.sessionPayerUserId) || input.sessionPayerUserId <= 0) {
+    return { ok: false as const, error: "invalid_session_payer" };
+  }
+
+  const guestCount = Number.isInteger(input.guestCount) ? (input.guestCount as number) : 0;
+  if (guestCount < 0) {
+    return { ok: false as const, error: "invalid_guest_count" };
+  }
+
+  const totalChargedShares = offUsers.length + guestCount;
+  if (totalChargedShares === 0) {
+    return { ok: false as const, error: "no_charge" };
+  }
+
+  const recipients = [...new Set(input.recipientOnUserIds)].sort((a, b) => a - b);
+  if (recipients.length === 0) {
+    return { ok: false as const, error: "missing_recipients" };
+  }
+
+  const totalCostCents = totalChargedShares * input.perOffFeeCents;
+  const recipientBase = Math.floor(totalCostCents / recipients.length);
+  const recipientRemainder = totalCostCents - recipientBase * recipients.length;
+
+  const paidMap = new Map<number, number>();
+  recipients.forEach((userId, idx) => {
+    paidMap.set(userId, recipientBase + (idx < recipientRemainder ? 1 : 0));
+  });
+
+  const owedMap = new Map<number, number>();
+  offUsers.forEach((userId) => {
+    owedMap.set(userId, input.perOffFeeCents);
+  });
+  if (guestCount > 0) {
+    const current = owedMap.get(input.sessionPayerUserId) ?? 0;
+    owedMap.set(input.sessionPayerUserId, current + guestCount * input.perOffFeeCents);
+  }
+
+  const userIds = [...new Set([...recipients, ...offUsers])].sort((a, b) => a - b);
+  const shares: ShuttlecockShareRow[] = userIds.map((userId) => ({
+    userId,
+    paidShareCents: paidMap.get(userId) ?? 0,
+    owedShareCents: owedMap.get(userId) ?? 0
+  }));
+
+  const payload: Record<string, unknown> = {
+    group_id: input.groupId,
+    description: input.description,
+    cost: centsToMoneyString(totalCostCents),
+    currency_code: input.currencyCode,
+    date: input.dateIso
+  };
+
+  shares.forEach((row, idx) => {
+    payload[`users__${idx}__user_id`] = row.userId;
+    payload[`users__${idx}__paid_share`] = centsToMoneyString(row.paidShareCents);
+    payload[`users__${idx}__owed_share`] = centsToMoneyString(row.owedShareCents);
+  });
+
+  return { ok: true as const, payload, shares, totalCostCents };
+}
+
+export function buildCourtExpenseNote(input: {
+  totalCostCents: number;
+  joinedPlayersCount: number;
+  guestCount: number;
+  sessionPayerLabel: string;
+}) {
+  const payer = trimOrNull(input.sessionPayerLabel) ?? "Unknown";
+  const guests = Number.isInteger(input.guestCount) && input.guestCount > 0 ? input.guestCount : 0;
+  const joined = Number.isInteger(input.joinedPlayersCount) && input.joinedPlayersCount > 0 ? input.joinedPlayersCount : 0;
+  return [
+    `Total: ${centsToMoneyString(input.totalCostCents)}`,
+    `Joined players: ${joined}, Guests: ${guests}`,
+    `Session payer: ${payer}`
+  ].join("\n");
+}
+
+export function buildShuttlecockExpenseNote(input: {
+  totalCostCents: number;
+  shuttleOffPlayersCount: number;
+  guestCount: number;
+  sessionPayerLabel: string;
+}) {
+  const payer = trimOrNull(input.sessionPayerLabel) ?? "Unknown";
+  const guests = Number.isInteger(input.guestCount) && input.guestCount > 0 ? input.guestCount : 0;
+  const off = Number.isInteger(input.shuttleOffPlayersCount) && input.shuttleOffPlayersCount > 0 ? input.shuttleOffPlayersCount : 0;
+  return [
+    `Total: ${centsToMoneyString(input.totalCostCents)}`,
+    `Shuttle OFF players: ${off}, Guests: ${guests}`,
+    `Session payer: ${payer}`
+  ].join("\n");
 }

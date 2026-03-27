@@ -9,6 +9,7 @@ function normalizePlayerRow(row: unknown) {
     ...record,
     splitwise_user_id: typeof record.splitwise_user_id === "number" ? record.splitwise_user_id : null,
     is_default_payer: typeof record.is_default_payer === "boolean" ? record.is_default_payer : false,
+    shuttlecock_paid: typeof record.shuttlecock_paid === "boolean" ? record.shuttlecock_paid : false,
     avatar_path: avatarPath,
     avatar_url: avatarPathToPublicUrl(process.env.SUPABASE_URL, avatarPath)
   };
@@ -17,6 +18,8 @@ function normalizePlayerRow(row: unknown) {
 export async function GET() {
   const supabaseAdmin = getSupabaseAdmin();
   const selectCandidates = [
+    "id,name,active,splitwise_user_id,is_default_payer,shuttlecock_paid,avatar_path",
+    "id,name,active,splitwise_user_id,is_default_payer,shuttlecock_paid",
     "id,name,active,splitwise_user_id,is_default_payer,avatar_path",
     "id,name,active,splitwise_user_id,is_default_payer",
     "id,name,active,avatar_path",
@@ -26,7 +29,12 @@ export async function GET() {
   let query = await supabaseAdmin.from("players").select(selectCandidates[0] as string).order("name", { ascending: true });
   for (let i = 1; i < selectCandidates.length && query.error; i += 1) {
     const message = query.error.message ?? "";
-    if (!message.includes("splitwise_user_id") && !message.includes("is_default_payer") && !message.includes("avatar_path")) {
+    if (
+      !message.includes("splitwise_user_id") &&
+      !message.includes("is_default_payer") &&
+      !message.includes("shuttlecock_paid") &&
+      !message.includes("avatar_path")
+    ) {
       break;
     }
     query = await supabaseAdmin.from("players").select(selectCandidates[i] as string).order("name", { ascending: true });
@@ -55,12 +63,17 @@ export async function POST(request: Request) {
   const { data, error } = await supabaseAdmin
     .from("players")
     .insert({ name })
-    .select("id,name,active,splitwise_user_id,is_default_payer,avatar_path")
+    .select("id,name,active,splitwise_user_id,is_default_payer,shuttlecock_paid,avatar_path")
     .single();
 
   if (error) {
     const message = error.message ?? "";
-    if (message.includes("splitwise_user_id") || message.includes("is_default_payer") || message.includes("avatar_path")) {
+    if (
+      message.includes("splitwise_user_id") ||
+      message.includes("is_default_payer") ||
+      message.includes("shuttlecock_paid") ||
+      message.includes("avatar_path")
+    ) {
       const fallback = await supabaseAdmin.from("players").insert({ name }).select("id,name,active").single();
       if (fallback.error) {
         return NextResponse.json({ ok: false, error: fallback.error.message }, { status: 500 });

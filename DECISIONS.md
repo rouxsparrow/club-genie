@@ -97,6 +97,12 @@
 - Decision: Keep `/sessions` as the primary V2 sessions experience on `main`, and preserve the old sessions page on a separate route `/sessions-legacy`. Do not reuse `/sessions-v2` for legacy preservation because that path is already owned by the latest branch history.
 - Rationale: Avoids merge/path conflicts with existing V2 work, keeps primary user flow unchanged, and provides a low-risk fallback/reference route for legacy behavior during transition.
 
+## ADR-0017: Splitwise Shuttlecock Redistribution With Multi-Expense Session Idempotency
+- Date: 2026-03-27
+- Status: Accepted
+- Decision: Extend Splitwise sync to support up to two expenses per CLOSED session by introducing `expenses.expense_type` (`COURT`, `SHUTTLECOCK`) and idempotency on `(session_id, expense_type)`. Add `players.shuttlecock_paid` and `splitwise_settings.shuttlecock_fee` to drive shuttlecock redistribution: participants with `shuttlecock_paid=false` are charged a fixed per-session shuttlecock fee, and collected shuttlecock amount is redistributed to all active players with `shuttlecock_paid=true` and valid `splitwise_user_id`.
+- Rationale: Supports existing club workflow where shuttlecock contributors are reimbursed separately from court fees without losing deterministic retries or splitting safety.
+
 ## Pending Decisions
 - Player identity model (predefined list vs free-text vs hybrid).
 - Session edit rules (post-close edits, participant locking, Splitwise regeneration).

@@ -59,28 +59,28 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| COMP-01 | TBD | Pending |
-| COMP-02 | TBD | Pending |
-| COMP-03 | TBD | Pending |
-| COMP-04 | TBD | Pending |
-| COMP-05 | TBD | Pending |
-| COMP-06 | TBD | Pending |
-| SHELL-01 | TBD | Pending |
-| SHELL-02 | TBD | Pending |
-| SHELL-03 | TBD | Pending |
-| PARITY-01 | TBD | Pending |
-| PARITY-02 | TBD | Pending |
-| PARITY-03 | TBD | Pending |
-| PARITY-04 | TBD | Pending |
-| PARITY-05 | TBD | Pending |
-| PARITY-06 | TBD | Pending |
-| PARITY-07 | TBD | Pending |
+| SHELL-02 | Phase 1 | Pending |
+| SHELL-03 | Phase 1 | Pending |
+| COMP-01 | Phase 2 | Pending |
+| COMP-02 | Phase 2 | Pending |
+| COMP-03 | Phase 2 | Pending |
+| COMP-04 | Phase 2 | Pending |
+| COMP-05 | Phase 2 | Pending |
+| COMP-06 | Phase 2 | Pending |
+| PARITY-01 | Phase 2 | Pending |
+| PARITY-02 | Phase 2 | Pending |
+| PARITY-03 | Phase 2 | Pending |
+| PARITY-04 | Phase 2 | Pending |
+| PARITY-05 | Phase 2 | Pending |
+| PARITY-06 | Phase 2 | Pending |
+| SHELL-01 | Phase 3 | Pending |
+| PARITY-07 | Phase 3 | Pending |
 
 **Coverage:**
 - v1 requirements: 16 total
-- Mapped to phases: 0
-- Unmapped: 16
+- Mapped to phases: 16
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-08*
-*Last updated: 2026-04-08 after initial definition*
+*Last updated: 2026-04-07 after roadmap creation*

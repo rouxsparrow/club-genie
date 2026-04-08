@@ -30,7 +30,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 Plans:
 - [x] 01-01-PLAN.md -- Create shared types, adminFetch utility, and formatter functions
-- [ ] 01-02-PLAN.md -- Wire page.tsx to import from shared files (replace inline definitions)
+- [x] 01-02-PLAN.md -- Wire page.tsx to import from shared files (replace inline definitions)
 
 ### Phase 2: Tab Extraction
 **Goal**: Every admin tab is an independent component with its own state, API calls, and rendering logic

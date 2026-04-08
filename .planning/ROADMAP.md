@@ -26,10 +26,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. A `src/components/admin/types.ts` file exists containing all shared admin types currently inline in page.tsx (player, session, settings, etc.)
   2. Shared fetch/error-handling patterns used across tabs are available as reusable hooks or utility functions
   3. The existing admin page still works identically after type and utility extraction (no regressions)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: TBD
+- [ ] 01-01-PLAN.md -- Create shared types, adminFetch utility, and formatter functions
+- [ ] 01-02-PLAN.md -- Wire page.tsx to import from shared files (replace inline definitions)
 
 ### Phase 2: Tab Extraction
 **Goal**: Every admin tab is an independent component with its own state, API calls, and rendering logic
@@ -70,6 +71,6 @@ Phases execute in numeric order: 1 -> 2 -> 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Shared Foundation | 0/1 | Not started | - |
+| 1. Shared Foundation | 0/2 | Not started | - |
 | 2. Tab Extraction | 0/3 | Not started | - |
 | 3. Shell Reduction | 0/1 | Not started | - |

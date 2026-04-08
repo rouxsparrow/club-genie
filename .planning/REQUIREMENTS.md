@@ -17,8 +17,8 @@
 ### Shell Reduction
 
 - [ ] **SHELL-01**: Admin page.tsx reduced to a thin composition shell (tab routing + component mounting)
-- [ ] **SHELL-02**: Shared types extracted into `src/components/admin/types.ts`
-- [ ] **SHELL-03**: Shared admin utilities (common fetch patterns, error handling) extracted into reusable hooks
+- [x] **SHELL-02**: Shared types extracted into `src/components/admin/types.ts`
+- [x] **SHELL-03**: Shared admin utilities (common fetch patterns, error handling) extracted into reusable hooks
 
 ### Behavior Parity
 
@@ -59,8 +59,8 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SHELL-02 | Phase 1 | Pending |
-| SHELL-03 | Phase 1 | Pending |
+| SHELL-02 | Phase 1 | Complete |
+| SHELL-03 | Phase 1 | Complete |
 | COMP-01 | Phase 2 | Pending |
 | COMP-02 | Phase 2 | Pending |
 | COMP-03 | Phase 2 | Pending |

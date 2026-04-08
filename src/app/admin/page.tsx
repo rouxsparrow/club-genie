@@ -12,25 +12,19 @@ import {
   isEmailPreviewRerunnable
 } from "../../lib/admin-email-preview-rerun";
 import "../globals-v2.css";
-
-type TabKey = "accounts" | "players" | "club" | "automation" | "emails" | "splitwise";
-
-type Player = {
-  id: string;
-  name: string;
-  active: boolean;
-  splitwise_user_id?: number | null;
-  is_default_payer?: boolean;
-  shuttlecock_paid?: boolean;
-  avatar_path?: string | null;
-  avatar_url?: string | null;
-};
-
-type PlayersResponse = {
-  ok: boolean;
-  players?: Player[];
-  error?: string;
-};
+import type {
+  TabKey,
+  Player,
+  PlayersResponse,
+  RunHistoryEntry,
+  RunHistoryStatusFilter,
+  RunHistorySourceFilter,
+  EmailPreviewMessage,
+  EmailRerunOutcomeStatus,
+  EmailRerunOutcome,
+  EmailRerunChip,
+  EmailRerunLog,
+} from "../../components/admin/types";
 
 type SplitwiseSettings = {
   id: number;
@@ -69,56 +63,6 @@ type ReceiptError = {
   gmail_message_id: string;
   parse_error: string | null;
   received_at: string | null;
-};
-
-type EmailPreviewMessage = {
-  id: string;
-  rawHtml: string | null;
-  rawText: string | null;
-  htmlLength: number;
-  textLength: number;
-  htmlTruncated: boolean;
-  textTruncated: boolean;
-  status: "NOT_INGESTED" | "PARSE_FAILED" | "SESSION_CREATED" | "INGESTED_NO_SESSION";
-  parseError: string | null;
-  parsedSessionDate: string | null;
-  sessionId: string | null;
-  sessionStatus: string | null;
-};
-
-type RunHistoryStatusFilter = "ALL" | "RUNNING" | "SUCCESS" | "FAILED" | "SKIPPED";
-type RunHistorySourceFilter = "ALL" | "GITHUB_CRON" | "ADMIN_MANUAL" | "API" | "UNKNOWN";
-
-type RunHistoryEntry = {
-  id: string;
-  job_type: "INGESTION" | "SPLITWISE";
-  run_source: RunHistorySourceFilter;
-  status: Exclude<RunHistoryStatusFilter, "ALL">;
-  started_at: string | null;
-  finished_at: string | null;
-  duration_ms: number | null;
-  summary: Record<string, unknown> | null;
-  error_message: string | null;
-  created_at: string | null;
-};
-
-type EmailRerunOutcomeStatus = "INGESTED" | "DEDUPED" | "PARSE_FAILED" | "FETCH_FAILED";
-
-type EmailRerunOutcome = {
-  messageId: string;
-  status: EmailRerunOutcomeStatus;
-  reason: string | null;
-};
-
-type EmailRerunChip = {
-  status: EmailRerunOutcomeStatus;
-  text: string;
-  tone: "emerald" | "amber" | "rose";
-};
-
-type EmailRerunLog = {
-  summary: string;
-  raw: unknown;
 };
 
 export default function AdminPage() {

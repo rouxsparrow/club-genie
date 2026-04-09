@@ -24,4 +24,24 @@ describe('phase 02 tab extraction source files', () => {
     expect(playersSource).toContain('Hide Advanced');
     expect(playersSource).toContain('Upload Avatar');
   });
+
+  it('creates standalone club access and automation tab components under src/components/admin', () => {
+    const clubAccessTabPath = projectPath('src/components/admin/club-access-tab.tsx');
+    const automationTabPath = projectPath('src/components/admin/automation-tab.tsx');
+
+    expect(existsSync(clubAccessTabPath)).toBe(true);
+    expect(existsSync(automationTabPath)).toBe(true);
+
+    const clubAccessSource = readFileSync(clubAccessTabPath, 'utf8');
+    const automationSource = readFileSync(automationTabPath, 'utf8');
+
+    expect(clubAccessSource).toContain('Rotate Token');
+    expect(clubAccessSource).toContain('Copy Invite Link');
+    expect(clubAccessSource).toContain('Current Access Link');
+
+    expect(automationSource).toContain('Receipt Ingestion');
+    expect(automationSource).toContain('Run Ingestion Now');
+    expect(automationSource).toContain('Ingestion Run History');
+    expect(automationSource).toContain('Parse Failures');
+  });
 });

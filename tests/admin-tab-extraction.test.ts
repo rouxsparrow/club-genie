@@ -68,3 +68,41 @@ describe('phase 02 tab extraction source files', () => {
     expect(emailsSource).toContain('buildSingleEmailRerunPayload');
   });
 });
+
+describe('phase 03 shell reduction source contract', () => {
+  const pagePath = projectPath('src/app/admin/page.tsx');
+
+  it('keeps local activeTab, eager tabs, and visited-tab state in the admin page shell', () => {
+    const pageSource = readFileSync(pagePath, 'utf8');
+
+    expect(pageSource).toContain("useState<TabKey>(\"players\")");
+    expect(pageSource).toContain('const eagerMountedTabs: TabKey[] = ["players", "club", "automation", "splitwise"]');
+    expect(pageSource).toContain('useState<Record<TabKey, boolean>>({');
+    expect(pageSource).toContain('accounts: false');
+    expect(pageSource).toContain('players: true');
+    expect(pageSource).toContain('club: false');
+    expect(pageSource).toContain('automation: false');
+    expect(pageSource).toContain('emails: false');
+    expect(pageSource).toContain('splitwise: true');
+  });
+
+  it('does not introduce query-param or router-based tab state', () => {
+    const pageSource = readFileSync(pagePath, 'utf8');
+
+    expect(pageSource).not.toContain('useSearchParams');
+    expect(pageSource).not.toContain('searchParams');
+    expect(pageSource).not.toContain('router.');
+    expect(pageSource).not.toContain('useRouter');
+  });
+
+  it('imports the shared tab shell helper instead of keeping duplicated tab button and panel blocks inline', () => {
+    const pageSource = readFileSync(pagePath, 'utf8');
+
+    expect(pageSource).toContain("from '../../components/admin/admin-tab-shell'");
+    expect(pageSource).toContain('renderAdminTabNav(');
+    expect(pageSource).toContain('renderAdminTabPanels(');
+    expect(pageSource).not.toContain('onClick={() => setActiveTab("accounts")}');
+    expect(pageSource).not.toContain('<AccountsTab />');
+    expect(pageSource).not.toContain('<SplitwiseTab />');
+  });
+});

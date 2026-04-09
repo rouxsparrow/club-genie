@@ -12,8 +12,8 @@ Break the 2,329-line monolithic admin page.tsx into independent tab components. 
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Shared Foundation** - Extract shared types and utility hooks from page.tsx so tab components have a clean API surface
-- [ ] **Phase 2: Tab Extraction** - Extract all 6 admin tabs into independent components with full behavior parity
+- [x] **Phase 1: Shared Foundation** - Extract shared types and utility hooks from page.tsx so tab components have a clean API surface
+- [x] **Phase 2: Tab Extraction** - Extract all 6 admin tabs into independent components with full behavior parity
 - [ ] **Phase 3: Shell Reduction** - Reduce page.tsx to a thin composition shell that mounts tab components
 
 ## Phase Details
@@ -42,13 +42,13 @@ Plans:
   3. All CRUD operations, toggles, settings changes, and action triggers on every tab work identically to the monolithic version
   4. Editing one tab's component file does not require changes to any other tab's component file
   5. The admin page renders and behaves the same as before when tab components are composed in page.tsx
-**Plans**: TBD
+**Plans**: 3 plans
 **UI hint**: yes
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
-- [ ] 02-03: TBD
+- [x] 02-01-PLAN.md -- Extract Accounts and Players into keep-mounted tab components (completed 2026-04-09)
+- [x] 02-02-PLAN.md -- Extract Club Access and Automation into keep-mounted tab components (completed 2026-04-09)
+- [x] 02-03-PLAN.md -- Extract Splitwise and Emails and finish the Phase 02 shell (completed 2026-04-09)
 
 ### Phase 3: Shell Reduction
 **Goal**: Admin page.tsx is a thin shell that only handles tab routing and component mounting
@@ -58,11 +58,11 @@ Plans:
   1. Admin page.tsx contains only tab navigation logic and component imports -- no business logic, no API calls, no inline state management
   2. Tab navigation (switching between tabs, URL state, active tab highlighting) works identically to the current behavior
   3. Admin page.tsx is under 150 lines (down from 2,329)
-**Plans**: TBD
+**Plans**: 1 plan
 **UI hint**: yes
 
 Plans:
-- [ ] 03-01: TBD
+- [ ] 03-01-PLAN.md -- Extract shared admin tab-shell helpers so page.tsx stays under 150 lines while preserving current local tab navigation semantics
 
 ## Progress
 
@@ -71,6 +71,16 @@ Phases execute in numeric order: 1 -> 2 -> 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Shared Foundation | 0/2 | Not started | - |
-| 2. Tab Extraction | 0/3 | Not started | - |
+| 1. Shared Foundation | 2/2 | Complete | 2026-04-08 |
+| 2. Tab Extraction | 3/3 | Complete | 2026-04-09 |
 | 3. Shell Reduction | 0/1 | Not started | - |
+
+### Phase 4: Admin page redesign only
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 3
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 4 to break down)

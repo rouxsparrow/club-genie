@@ -98,7 +98,7 @@ describe('phase 03 shell reduction source contract', () => {
   it('imports the shared tab shell helper instead of keeping duplicated tab button and panel blocks inline', () => {
     const pageSource = readFileSync(pagePath, 'utf8');
 
-    expect(pageSource).toContain("from '../../components/admin/admin-tab-shell'");
+    expect(pageSource).toContain('../../components/admin/admin-tab-shell');
     expect(pageSource).toContain('renderAdminTabNav(');
     expect(pageSource).toContain('renderAdminTabPanels(');
     expect(pageSource).not.toContain('onClick={() => setActiveTab("accounts")}');

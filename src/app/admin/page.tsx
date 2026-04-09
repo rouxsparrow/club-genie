@@ -1,12 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import AccountsTab from "../../components/admin/accounts-tab";
-import AutomationTab from "../../components/admin/automation-tab";
-import ClubAccessTab from "../../components/admin/club-access-tab";
-import EmailsTab from "../../components/admin/emails-tab";
-import PlayersTab from "../../components/admin/players-tab";
-import SplitwiseTab from "../../components/admin/splitwise-tab";
+import { renderAdminTabNav, renderAdminTabPanels } from "../../components/admin/admin-tab-shell";
 import type { TabKey } from "../../components/admin/types";
 import AdminNavbar from "../../components/admin-navbar";
 import AnimatedBackground from "../../components/v2/AnimatedBackground";
@@ -61,110 +56,8 @@ export default function AdminPage() {
           </div>
         </header>
 
-        <nav className="v2-admin-tab-nav mt-8 flex gap-3 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
-          <button
-            type="button"
-            onClick={() => setActiveTab("accounts")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold ${
-              activeTab === "accounts"
-                ? "bg-emerald-500 text-slate-900"
-                : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
-            }`}
-          >
-            Accounts
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("players")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold ${
-              activeTab === "players"
-                ? "bg-emerald-500 text-slate-900"
-                : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
-            }`}
-          >
-            Players
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("club")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold ${
-              activeTab === "club"
-                ? "bg-emerald-500 text-slate-900"
-                : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
-            }`}
-          >
-            Club Access
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("automation")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold ${
-              activeTab === "automation"
-                ? "bg-emerald-500 text-slate-900"
-                : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
-            }`}
-          >
-            Automation
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("emails")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold ${
-              activeTab === "emails"
-                ? "bg-emerald-500 text-slate-900"
-                : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
-            }`}
-          >
-            Email Preview
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("splitwise")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold ${
-              activeTab === "splitwise"
-                ? "bg-emerald-500 text-slate-900"
-                : "border border-slate-200 text-slate-600 dark:border-ink-700/60 dark:text-slate-100"
-            }`}
-          >
-            Splitwise
-          </button>
-        </nav>
-
-        {keepMounted("accounts") ? (
-          <div hidden={activeTab !== "accounts"} aria-hidden={activeTab !== "accounts"}>
-            <AccountsTab />
-          </div>
-        ) : null}
-
-        {keepMounted("players") ? (
-          <div hidden={activeTab !== "players"} aria-hidden={activeTab !== "players"}>
-            <PlayersTab />
-          </div>
-        ) : null}
-
-        {keepMounted("club") ? (
-          <div hidden={activeTab !== "club"} aria-hidden={activeTab !== "club"}>
-            <ClubAccessTab />
-          </div>
-        ) : null}
-
-        {keepMounted("automation") ? (
-          <div hidden={activeTab !== "automation"} aria-hidden={activeTab !== "automation"}>
-            <AutomationTab />
-          </div>
-        ) : null}
-
-        {keepMounted("emails") ? (
-          <div hidden={activeTab !== "emails"} aria-hidden={activeTab !== "emails"}>
-            <EmailsTab />
-          </div>
-        ) : null}
-
-        {keepMounted("splitwise") ? (
-          <div hidden={activeTab !== "splitwise"} aria-hidden={activeTab !== "splitwise"}>
-            <SplitwiseTab />
-          </div>
-        ) : null}
+        {renderAdminTabNav(activeTab, setActiveTab)}
+        {renderAdminTabPanels(activeTab, keepMounted)}
       </div>
     </main>
   );

@@ -1,14 +1,14 @@
 "use client";
 
-import { Lock } from "../../components/icons";
 import { useEffect, useMemo, useState } from "react";
 import AccountsTab from "../../components/admin/accounts-tab";
+import AutomationTab from "../../components/admin/automation-tab";
+import ClubAccessTab from "../../components/admin/club-access-tab";
 import PlayersTab from "../../components/admin/players-tab";
 import AdminNavbar from "../../components/admin-navbar";
 import AnimatedBackground from "../../components/v2/AnimatedBackground";
 import {
   buildSingleEmailRerunPayload,
-  collectNotIngestedMessageIds,
   isEmailPreviewRerunnable
 } from "../../lib/admin-email-preview-rerun";
 import "../globals-v2.css";
@@ -22,7 +22,7 @@ import type {
   EmailRerunChip,
   EmailRerunLog,
 } from "../../components/admin/types";
-import { formatDuration, formatIngestionHistorySummary, formatSplitwiseHistorySummary } from "../../components/admin/formatters";
+import { formatDuration, formatSplitwiseHistorySummary } from "../../components/admin/formatters";
 
 type SplitwiseSettings = {
   id: number;
@@ -36,37 +36,10 @@ type SplitwiseSettings = {
   updated_at: string | null;
 };
 
-type AutomationSettings = {
-  id: number;
-  subject_keywords: string[];
-  timezone: string;
-  enabled: boolean;
-  updated_at: string | null;
-};
-
-type ClubTokenWarningCode = "migration_missing_token_value" | "token_not_recoverable";
-
-type ClubTokenCurrentResponse = {
-  ok: boolean;
-  token?: string | null;
-  tokenVersion?: number | null;
-  rotatedAt?: string | null;
-  warningCode?: ClubTokenWarningCode;
-  warningMessage?: string;
-  error?: string;
-};
-
-type ReceiptError = {
-  id: string;
-  gmail_message_id: string;
-  parse_error: string | null;
-  received_at: string | null;
-};
-
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("players");
   const [mounted, setMounted] = useState(false);
-  const eagerMountedTabs: TabKey[] = ["players"];
+  const eagerMountedTabs: TabKey[] = ["players", "club", "automation"];
   const [visitedTabs, setVisitedTabs] = useState<Record<TabKey, boolean>>({
     accounts: false,
     players: true,
@@ -75,30 +48,6 @@ export default function AdminPage() {
     emails: false,
     splitwise: false,
   });
-  const [isRotating, setIsRotating] = useState(false);
-  const [newToken, setNewToken] = useState<string | null>(null);
-  const [rotationError, setRotationError] = useState<string | null>(null);
-  const [automationSettings, setAutomationSettings] = useState<AutomationSettings | null>(null);
-  const [keywordsInput, setKeywordsInput] = useState("");
-  const [loadingAutomation, setLoadingAutomation] = useState(true);
-  const [automationMessage, setAutomationMessage] = useState<string | null>(null);
-  const [runningIngestion, setRunningIngestion] = useState(false);
-  const [runSummary, setRunSummary] = useState<{
-    total: number;
-    ingested: number;
-    deduped: number;
-    parse_failed: number;
-    fetch_failed: number;
-  } | null>(null);
-  const [automationHistoryStatusFilter, setAutomationHistoryStatusFilter] = useState<RunHistoryStatusFilter>("ALL");
-  const [automationHistorySourceFilter, setAutomationHistorySourceFilter] = useState<RunHistorySourceFilter>("ALL");
-  const [automationRunHistory, setAutomationRunHistory] = useState<RunHistoryEntry[]>([]);
-  const [loadingAutomationRunHistory, setLoadingAutomationRunHistory] = useState(false);
-  const [receiptErrors, setReceiptErrors] = useState<ReceiptError[]>([]);
-  const [loadingReceiptErrors, setLoadingReceiptErrors] = useState(true);
-  const [currentToken, setCurrentToken] = useState<string | null>(null);
-  const [currentAccessLink, setCurrentAccessLink] = useState<string | null>(null);
-  const [clubMessage, setClubMessage] = useState<string | null>(null);
   const [previewQueryInput, setPreviewQueryInput] = useState("");
   const [loadingEmailPreview, setLoadingEmailPreview] = useState(false);
   const [emailPreviewMessage, setEmailPreviewMessage] = useState<string | null>(null);
@@ -167,65 +116,13 @@ export default function AdminPage() {
   const hasVisited = (tab: TabKey) => eagerMountedTabs.includes(tab) || visitedTabs[tab];
   const keepMounted = (tab: TabKey) => hasVisited(tab);
 
-  const refreshCurrentClubToken = async () => {
-    const response = await fetch("/api/admin/club-token/current", { credentials: "include" });
-    const data = (await response.json()) as ClubTokenCurrentResponse;
-    if (!data.ok) {
-      setClubMessage(data.error ?? "Failed to load current token from DB.");
-      setCurrentToken(null);
-      setCurrentAccessLink(null);
-      return;
-    }
-    const token = typeof data.token === "string" && data.token.trim() ? data.token : null;
-    setCurrentToken(token);
-    setCurrentAccessLink(token ? `${window.location.origin}/sessions?t=${token}` : null);
-    if (!token && data.warningMessage) {
-      setClubMessage(data.warningMessage);
-      return;
-    }
-    setClubMessage(null);
-  };
-
   useEffect(() => {
     setMounted(true);
     let isMounted = true;
-    Promise.all([
-      fetch("/api/admin/automation-settings", { credentials: "include" }).then((response) => response.json()),
-      fetch("/api/admin/receipt-errors", { credentials: "include" }).then((response) => response.json()),
-      fetch("/api/admin/club-token/current", { credentials: "include" }).then((response) => response.json()),
-      fetch("/api/admin/splitwise-settings", { credentials: "include" }).then((response) => response.json())
-    ])
-      .then(([settingsData, errorsData, tokenData, splitwiseSettingsData]) => {
+    fetch("/api/admin/splitwise-settings", { credentials: "include" })
+      .then((response) => response.json())
+      .then((splitwiseSettingsData) => {
         if (!isMounted) return;
-        const settingsPayload = settingsData as { ok: boolean; settings?: AutomationSettings };
-        if (settingsPayload.ok && settingsPayload.settings) {
-          setAutomationSettings(settingsPayload.settings);
-          setKeywordsInput((settingsPayload.settings.subject_keywords ?? []).join(", "));
-        } else {
-          setAutomationMessage("Failed to load automation settings.");
-        }
-        setLoadingAutomation(false);
-
-        const errorsPayload = errorsData as { ok: boolean; errors?: ReceiptError[] };
-        if (errorsPayload.ok) {
-          setReceiptErrors(errorsPayload.errors ?? []);
-        }
-        setLoadingReceiptErrors(false);
-
-        const tokenPayload = tokenData as ClubTokenCurrentResponse;
-        if (tokenPayload.ok) {
-          const token = typeof tokenPayload.token === "string" && tokenPayload.token.trim() ? tokenPayload.token : null;
-          setCurrentToken(token);
-          setCurrentAccessLink(token ? `${window.location.origin}/sessions?t=${token}` : null);
-          if (!token && tokenPayload.warningMessage) {
-            setClubMessage(tokenPayload.warningMessage);
-          } else {
-            setClubMessage(null);
-          }
-        } else {
-          setClubMessage(tokenPayload.error ?? "Failed to load current token from DB.");
-        }
-
         const splitwisePayload = splitwiseSettingsData as { ok: boolean; settings?: SplitwiseSettings; error?: string };
         if (splitwisePayload.ok && splitwisePayload.settings) {
           setSplitwiseSettings(splitwisePayload.settings);
@@ -267,10 +164,6 @@ export default function AdminPage() {
       })
       .catch(() => {
         if (!isMounted) return;
-        setAutomationMessage("Failed to load automation settings.");
-        setLoadingAutomation(false);
-        setLoadingReceiptErrors(false);
-        setClubMessage("Failed to load current token from DB.");
         setSplitwiseMessage("Failed to load Splitwise settings.");
         setLoadingSplitwise(false);
       });
@@ -282,52 +175,6 @@ export default function AdminPage() {
   useEffect(() => {
     setVisitedTabs((prev) => (prev[activeTab] ? prev : { ...prev, [activeTab]: true }));
   }, [activeTab]);
-
-  const refreshAutomationSettings = async () => {
-    setLoadingAutomation(true);
-    const response = await fetch("/api/admin/automation-settings", { credentials: "include" });
-    const data = (await response.json()) as { ok: boolean; settings?: AutomationSettings; error?: string };
-    if (!data.ok || !data.settings) {
-      setAutomationMessage(data.error ?? "Failed to load automation settings.");
-      setLoadingAutomation(false);
-      return;
-    }
-    setAutomationSettings(data.settings);
-    setKeywordsInput((data.settings.subject_keywords ?? []).join(", "));
-    setLoadingAutomation(false);
-  };
-
-  const refreshReceiptErrors = async () => {
-    setLoadingReceiptErrors(true);
-    const response = await fetch("/api/admin/receipt-errors", { credentials: "include" });
-    const data = (await response.json()) as { ok: boolean; errors?: ReceiptError[] };
-    if (data.ok) {
-      setReceiptErrors(data.errors ?? []);
-    }
-    setLoadingReceiptErrors(false);
-  };
-
-  const loadAutomationRunHistory = async () => {
-    setLoadingAutomationRunHistory(true);
-    const qs = new URLSearchParams();
-    if (automationHistoryStatusFilter !== "ALL") {
-      qs.set("status", automationHistoryStatusFilter);
-    }
-    if (automationHistorySourceFilter !== "ALL") {
-      qs.set("source", automationHistorySourceFilter);
-    }
-    qs.set("limit", "30");
-    const response = await fetch(`/api/admin/automation/run-history?${qs.toString()}`, { credentials: "include" });
-    const data = (await response.json().catch(() => null)) as { ok?: boolean; runs?: RunHistoryEntry[]; error?: string } | null;
-    if (!data?.ok) {
-      setAutomationMessage(data?.error ?? "Failed to load run history.");
-      setLoadingAutomationRunHistory(false);
-      return;
-    }
-    setAutomationRunHistory(Array.isArray(data.runs) ? data.runs : []);
-    setLoadingAutomationRunHistory(false);
-  };
-
   const loadSplitwiseRunHistory = async () => {
     setLoadingSplitwiseRunHistory(true);
     const qs = new URLSearchParams();
@@ -347,73 +194,6 @@ export default function AdminPage() {
     }
     setSplitwiseRunHistory(Array.isArray(data.runs) ? data.runs : []);
     setLoadingSplitwiseRunHistory(false);
-  };
-
-  const saveAutomationSettings = async () => {
-    const keywords = keywordsInput
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    if (keywords.length === 0) {
-      setAutomationMessage("Provide at least one subject keyword.");
-      return;
-    }
-
-    const response = await fetch("/api/admin/automation-settings", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ subjectKeywords: keywords })
-    });
-    const data = (await response.json()) as { ok: boolean; settings?: AutomationSettings; error?: string };
-    if (!data.ok || !data.settings) {
-      setAutomationMessage(data.error ?? "Failed to save settings.");
-      return;
-    }
-    setAutomationSettings(data.settings);
-    setKeywordsInput((data.settings.subject_keywords ?? []).join(", "));
-    setAutomationMessage("Automation settings saved.");
-  };
-
-  const runIngestionNow = async () => {
-    setRunningIngestion(true);
-    setAutomationMessage(null);
-    const notIngestedMessageIds = collectNotIngestedMessageIds(emailPreview?.messages ?? []);
-    const response = await fetch("/api/admin/ingestion/run", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(notIngestedMessageIds.length > 0 ? { messageIds: notIngestedMessageIds } : {})
-    });
-    const data = (await response.json()) as {
-      ok: boolean;
-      total?: number;
-      ingested?: number;
-      deduped?: number;
-      parse_failed?: number;
-      fetch_failed?: number;
-      error?: string;
-    };
-    if (!data.ok) {
-      setAutomationMessage(data.error ?? "Ingestion run failed.");
-      setRunningIngestion(false);
-      return;
-    }
-
-    setRunSummary({
-      total: data.total ?? 0,
-      ingested: data.ingested ?? 0,
-      deduped: data.deduped ?? 0,
-      parse_failed: data.parse_failed ?? 0,
-      fetch_failed: data.fetch_failed ?? 0
-    });
-    setAutomationMessage(
-      notIngestedMessageIds.length > 0
-        ? `Ingestion run completed. Included ${notIngestedMessageIds.length} preview Not Ingested email(s).`
-        : "Ingestion run completed. No preview Not Ingested emails were included."
-    );
-    setRunningIngestion(false);
-    await Promise.all([refreshReceiptErrors(), refreshAutomationSettings(), loadAutomationRunHistory()]);
   };
 
   const loadEmailPreview = async (options?: { successMessage?: string; preserveRerunResults?: boolean }) => {
@@ -745,49 +525,6 @@ export default function AdminPage() {
     setSplitwiseMessage("Splitwise record deleted from DB.");
   };
 
-  const handleRotateToken = async () => {
-    setIsRotating(true);
-    setRotationError(null);
-    setClubMessage(null);
-    const response = await fetch("/api/admin/club-token/rotate", {
-      method: "POST",
-      credentials: "include"
-    });
-    const data = (await response.json()) as {
-      ok: boolean;
-      token?: string;
-      error?: string;
-      warningCode?: "token_value_not_persisted";
-      warningMessage?: string;
-    };
-    if (!data.ok || !data.token) {
-      setRotationError(data.error ?? "Token rotation failed.");
-      setIsRotating(false);
-      return;
-    }
-    setNewToken(data.token);
-    setCurrentToken(data.token);
-    setCurrentAccessLink(`${window.location.origin}/sessions?t=${data.token}`);
-    await refreshCurrentClubToken();
-    if (data.warningMessage) {
-      setRotationError(data.warningMessage);
-    }
-    setIsRotating(false);
-  };
-
-  const copyInviteLink = async () => {
-    if (!newToken) return;
-    const link = `${window.location.origin}/sessions?t=${newToken}`;
-    await navigator.clipboard.writeText(link);
-    setRotationError("Invite link copied.");
-  };
-
-  const copyCurrentAccessLink = async () => {
-    if (!currentAccessLink) return;
-    await navigator.clipboard.writeText(currentAccessLink);
-    setClubMessage("Current access link copied.");
-  };
-
   if (!mounted) {
     return (
       <main className="v2-page v2-admin-page">
@@ -894,274 +631,16 @@ export default function AdminPage() {
         </div>
       ) : null}
 
-      {activeTab === "club" ? (
-        <section className="mt-8 grid gap-6 md:grid-cols-2">
-          <div className="card">
-            <div className="flex items-center gap-3 text-slate-600 dark:text-slate-300">
-              <Lock size={18} />
-              <span className="text-xs font-semibold uppercase tracking-wider">Access</span>
-            </div>
-            <h2 className="mt-3 text-2xl font-semibold">Club Access Token</h2>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
-              Rotate the token to invalidate all prior invite links.
-            </p>
-            {rotationError ? <p className="mt-4 text-sm text-slate-500">{rotationError}</p> : null}
-            {newToken ? (
-              <div className="mt-4 grid gap-3">
-                <p className="text-sm font-semibold">New token</p>
-                <code className="rounded-2xl border border-slate-200/70 bg-slate-100 px-3 py-2 text-xs dark:border-ink-700/60 dark:bg-ink-900/40">
-                  {newToken}
-                </code>
-                <button
-                  type="button"
-                  onClick={copyInviteLink}
-                  className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900"
-                >
-                  Copy Invite Link
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleRotateToken}
-                disabled={isRotating}
-                className="mt-4 rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900"
-              >
-                {isRotating ? "Rotating..." : "Rotate Token"}
-              </button>
-            )}
-          </div>
-          <div className="card-muted">
-            <h3 className="text-lg font-semibold">Invite Link</h3>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
-              After rotating, share the new invite link with your players. The full link includes the new token as a
-              query parameter.
-            </p>
-            <p className="mt-4 text-xs text-slate-400">
-              Example: https://your-app/sessions?t=NEW_TOKEN
-            </p>
-          </div>
-          <div className="card md:col-span-2">
-            <h3 className="text-lg font-semibold">Current Access Link</h3>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
-              This access link is built from the current token stored in Supabase.
-            </p>
-            {clubMessage ? <p className="mt-3 text-sm text-slate-500">{clubMessage}</p> : null}
-            {currentAccessLink ? (
-              <div className="mt-4 grid gap-3">
-                <code className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-slate-100 px-3 py-2 text-xs dark:border-ink-700/60 dark:bg-ink-900/40">
-                  {currentAccessLink}
-                </code>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    onClick={copyCurrentAccessLink}
-                    className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900"
-                  >
-                    Copy Current Link
-                  </button>
-                  <code className="rounded-xl border border-slate-200/70 bg-slate-100 px-3 py-2 text-xs dark:border-ink-700/60 dark:bg-ink-900/40">
-                    {currentToken}
-                  </code>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4 grid gap-3">
-                <p className="text-sm text-slate-500 dark:text-slate-300">
-                  No token found in Supabase yet. Rotate once to create one.
-                </p>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    onClick={copyCurrentAccessLink}
-                    disabled
-                    className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-50"
-                  >
-                    Copy Current Link
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
+      {keepMounted("club") ? (
+        <div hidden={activeTab !== "club"} aria-hidden={activeTab !== "club"}>
+          <ClubAccessTab />
+        </div>
       ) : null}
 
-      {activeTab === "automation" ? (
-        <section className="mt-8 grid gap-6">
-          <div className="card">
-            <h2 className="text-2xl font-semibold">Receipt Ingestion</h2>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
-              Configure Gmail subject matching and run ingestion manually when needed.
-            </p>
-            {automationMessage ? <p className="mt-3 text-sm text-slate-500">{automationMessage}</p> : null}
-            {loadingAutomation ? (
-              <p className="mt-4 text-sm text-slate-500">Loading automation settings...</p>
-            ) : (
-              <div className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr]">
-                <label className="text-sm font-semibold">
-                  Subject Keywords (comma separated)
-                  <input
-                    type="text"
-                    value={keywordsInput}
-                    onChange={(event) => setKeywordsInput(event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
-                    placeholder="Playtomic, Receipt"
-                  />
-                </label>
-                <label className="text-sm font-semibold">
-                  Timezone
-                  <input
-                    type="text"
-                    value={automationSettings?.timezone ?? "Asia/Singapore"}
-                    disabled
-                    className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-900/40"
-                  />
-                </label>
-              </div>
-            )}
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={saveAutomationSettings}
-                disabled={loadingAutomation}
-                className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"
-              >
-                Save Settings
-              </button>
-              <button
-                type="button"
-                onClick={runIngestionNow}
-                disabled={runningIngestion}
-                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100 disabled:opacity-60"
-              >
-                {runningIngestion ? "Running..." : "Run Ingestion Now"}
-              </button>
-            </div>
-            {runSummary ? (
-              <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200/80 p-4 text-sm dark:border-ink-700/60 md:grid-cols-5">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-400">Total</p>
-                  <p className="font-semibold">{runSummary.total}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-400">Ingested</p>
-                  <p className="font-semibold">{runSummary.ingested}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-400">Deduped</p>
-                  <p className="font-semibold">{runSummary.deduped}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-400">Parse Failed</p>
-                  <p className="font-semibold">{runSummary.parse_failed}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-400">Fetch Failed</p>
-                  <p className="font-semibold">{runSummary.fetch_failed}</p>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="card">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold">Ingestion Run History</h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
-                  Query cron and manual ingestion run results.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <select
-                  value={automationHistorySourceFilter}
-                  onChange={(event) => setAutomationHistorySourceFilter(event.target.value as RunHistorySourceFilter)}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
-                >
-                  <option value="ALL">All Sources</option>
-                  <option value="GITHUB_CRON">GitHub Cron</option>
-                  <option value="ADMIN_MANUAL">Admin Manual</option>
-                  <option value="API">API</option>
-                  <option value="UNKNOWN">Unknown</option>
-                </select>
-                <select
-                  value={automationHistoryStatusFilter}
-                  onChange={(event) => setAutomationHistoryStatusFilter(event.target.value as RunHistoryStatusFilter)}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
-                >
-                  <option value="ALL">All Statuses</option>
-                  <option value="RUNNING">RUNNING</option>
-                  <option value="SUCCESS">SUCCESS</option>
-                  <option value="FAILED">FAILED</option>
-                  <option value="SKIPPED">SKIPPED</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={loadAutomationRunHistory}
-                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-ink-700/60 dark:text-slate-100"
-                >
-                  {loadingAutomationRunHistory ? "Loading..." : "Load History"}
-                </button>
-              </div>
-            </div>
-
-            {automationRunHistory.length === 0 ? (
-              <p className="mt-4 text-sm text-slate-500">{loadingAutomationRunHistory ? "" : "No runs found."}</p>
-            ) : (
-              <div className="v2-admin-table-wrap mt-4 overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-ink-700/60">
-                <table className="w-full min-w-[640px] text-left text-xs sm:min-w-[900px] sm:text-sm">
-                  <thead className="bg-slate-100/70 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-ink-900/40 dark:text-slate-300">
-                    <tr>
-                      <th className="px-4 py-3">Started</th>
-                      <th className="px-4 py-3">Source</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Duration</th>
-                      <th className="px-4 py-3">Summary</th>
-                      <th className="px-4 py-3">Error</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200/70 dark:divide-ink-700/60">
-                    {automationRunHistory.map((entry) => (
-                      <tr key={entry.id}>
-                        <td className="px-4 py-3">{entry.started_at ? new Date(entry.started_at).toLocaleString() : "-"}</td>
-                        <td className="px-4 py-3">{entry.run_source}</td>
-                        <td className="px-4 py-3">{entry.status}</td>
-                        <td className="px-4 py-3">{formatDuration(entry.duration_ms)}</td>
-                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-300">
-                          {formatIngestionHistorySummary(entry.summary)}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-rose-500">{entry.error_message ?? "-"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <div className="card">
-            <h3 className="text-lg font-semibold">Parse Failures</h3>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
-              Latest receipt parse failures that require admin review.
-            </p>
-            {loadingReceiptErrors ? (
-              <p className="mt-4 text-sm text-slate-500">Loading failures...</p>
-            ) : receiptErrors.length === 0 ? (
-              <p className="mt-4 text-sm text-slate-500">No parse failures.</p>
-            ) : (
-              <ul className="mt-4 space-y-3">
-                {receiptErrors.map((error) => (
-                  <li key={error.id} className="rounded-2xl border border-slate-200/80 p-4 text-sm dark:border-ink-700/60">
-                    <p className="font-semibold">{error.gmail_message_id}</p>
-                    <p className="mt-1 text-slate-500 dark:text-slate-300">{error.parse_error ?? "parse_failed"}</p>
-                    {error.received_at ? (
-                      <p className="mt-1 text-xs text-slate-400">{new Date(error.received_at).toLocaleString()}</p>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </section>
+      {keepMounted("automation") ? (
+        <div hidden={activeTab !== "automation"} aria-hidden={activeTab !== "automation"}>
+          <AutomationTab previewMessages={emailPreview?.messages ?? []} />
+        </div>
       ) : null}
 
       {activeTab === "splitwise" ? (

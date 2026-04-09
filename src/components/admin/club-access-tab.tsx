@@ -2,6 +2,7 @@
 
 import { Lock } from "../../components/icons";
 import { useEffect, useState } from "react";
+import { adminFetch } from "./admin-fetch";
 
 type ClubTokenWarningCode = "migration_missing_token_value" | "token_not_recoverable";
 
@@ -24,8 +25,7 @@ export default function ClubAccessTab() {
   const [clubMessage, setClubMessage] = useState<string | null>(null);
 
   const refreshCurrentClubToken = async () => {
-    const response = await fetch("/api/admin/club-token/current", { credentials: "include" });
-    const data = (await response.json()) as ClubTokenCurrentResponse;
+    const data = await adminFetch<ClubTokenCurrentResponse>("/api/admin/club-token/current");
     if (!data.ok) {
       setClubMessage(data.error ?? "Failed to load current token from DB.");
       setCurrentToken(null);
@@ -50,17 +50,16 @@ export default function ClubAccessTab() {
     setIsRotating(true);
     setRotationError(null);
     setClubMessage(null);
-    const response = await fetch("/api/admin/club-token/rotate", {
-      method: "POST",
-      credentials: "include",
-    });
-    const data = (await response.json()) as {
+    const data = await adminFetch<{
       ok: boolean;
       token?: string;
       error?: string;
       warningCode?: "token_value_not_persisted";
       warningMessage?: string;
-    };
+    }>("/api/admin/club-token/rotate", {
+      method: "POST",
+      credentials: "include",
+    });
     if (!data.ok || !data.token) {
       setRotationError(data.error ?? "Token rotation failed.");
       setIsRotating(false);

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { collectNotIngestedMessageIds } from "../../lib/admin-email-preview-rerun";
+import { adminFetch } from "./admin-fetch";
 import { formatDuration, formatIngestionHistorySummary } from "./formatters";
 import type {
   EmailPreviewMessage,
@@ -53,8 +54,9 @@ export default function AutomationTab({ previewMessages = [] }: AutomationTabPro
 
   const refreshAutomationSettings = async () => {
     setLoadingAutomation(true);
-    const response = await fetch("/api/admin/automation-settings", { credentials: "include" });
-    const data = (await response.json()) as { ok: boolean; settings?: AutomationSettings; error?: string };
+    const data = await adminFetch<{ ok: boolean; settings?: AutomationSettings; error?: string }>(
+      "/api/admin/automation-settings",
+    );
     if (!data.ok || !data.settings) {
       setAutomationMessage(data.error ?? "Failed to load automation settings.");
       setLoadingAutomation(false);
@@ -67,8 +69,9 @@ export default function AutomationTab({ previewMessages = [] }: AutomationTabPro
 
   const refreshReceiptErrors = async () => {
     setLoadingReceiptErrors(true);
-    const response = await fetch("/api/admin/receipt-errors", { credentials: "include" });
-    const data = (await response.json()) as { ok: boolean; errors?: ReceiptError[] };
+    const data = await adminFetch<{ ok: boolean; errors?: ReceiptError[]; error?: string }>(
+      "/api/admin/receipt-errors",
+    );
     if (data.ok) {
       setReceiptErrors(data.errors ?? []);
     }
@@ -85,8 +88,9 @@ export default function AutomationTab({ previewMessages = [] }: AutomationTabPro
       qs.set("source", automationHistorySourceFilter);
     }
     qs.set("limit", "30");
-    const response = await fetch(`/api/admin/automation/run-history?${qs.toString()}`, { credentials: "include" });
-    const data = (await response.json().catch(() => null)) as { ok?: boolean; runs?: RunHistoryEntry[]; error?: string } | null;
+    const data = await adminFetch<{ ok: boolean; runs?: RunHistoryEntry[]; error?: string }>(
+      `/api/admin/automation/run-history?${qs.toString()}`,
+    );
     if (!data?.ok) {
       setAutomationMessage(data?.error ?? "Failed to load run history.");
       setLoadingAutomationRunHistory(false);
@@ -99,21 +103,21 @@ export default function AutomationTab({ previewMessages = [] }: AutomationTabPro
   useEffect(() => {
     let isMounted = true;
     Promise.all([
-      fetch("/api/admin/automation-settings", { credentials: "include" }).then((response) => response.json()),
-      fetch("/api/admin/receipt-errors", { credentials: "include" }).then((response) => response.json()),
+      adminFetch<{ ok: boolean; settings?: AutomationSettings; error?: string }>("/api/admin/automation-settings"),
+      adminFetch<{ ok: boolean; errors?: ReceiptError[]; error?: string }>("/api/admin/receipt-errors"),
     ])
       .then(([settingsData, errorsData]) => {
         if (!isMounted) return;
-        const settingsPayload = settingsData as { ok: boolean; settings?: AutomationSettings };
+        const settingsPayload = settingsData as { ok: boolean; settings?: AutomationSettings; error?: string };
         if (settingsPayload.ok && settingsPayload.settings) {
           setAutomationSettings(settingsPayload.settings);
           setKeywordsInput((settingsPayload.settings.subject_keywords ?? []).join(", "));
         } else {
-          setAutomationMessage("Failed to load automation settings.");
+          setAutomationMessage(settingsPayload.error ?? "Failed to load automation settings.");
         }
         setLoadingAutomation(false);
 
-        const errorsPayload = errorsData as { ok: boolean; errors?: ReceiptError[] };
+        const errorsPayload = errorsData as { ok: boolean; errors?: ReceiptError[]; error?: string };
         if (errorsPayload.ok) {
           setReceiptErrors(errorsPayload.errors ?? []);
         }
@@ -147,9 +151,11 @@ export default function AutomationTab({ previewMessages = [] }: AutomationTabPro
       credentials: "include",
       body: JSON.stringify({ subjectKeywords: keywords }),
     });
-    const data = (await response.json()) as { ok: boolean; settings?: AutomationSettings; error?: string };
-    if (!data.ok || !data.settings) {
-      setAutomationMessage(data.error ?? "Failed to save settings.");
+    const data = (await response.json().catch(() => null)) as
+      | { ok?: boolean; settings?: AutomationSettings; error?: string }
+      | null;
+    if (!data?.ok || !data.settings) {
+      setAutomationMessage(data?.error ?? "Failed to save settings.");
       return;
     }
     setAutomationSettings(data.settings);
@@ -167,17 +173,19 @@ export default function AutomationTab({ previewMessages = [] }: AutomationTabPro
       credentials: "include",
       body: JSON.stringify(notIngestedMessageIds.length > 0 ? { messageIds: notIngestedMessageIds } : {}),
     });
-    const data = (await response.json()) as {
-      ok: boolean;
-      total?: number;
-      ingested?: number;
-      deduped?: number;
-      parse_failed?: number;
-      fetch_failed?: number;
-      error?: string;
-    };
-    if (!data.ok) {
-      setAutomationMessage(data.error ?? "Ingestion run failed.");
+    const data = (await response.json().catch(() => null)) as
+      | {
+          ok?: boolean;
+          total?: number;
+          ingested?: number;
+          deduped?: number;
+          parse_failed?: number;
+          fetch_failed?: number;
+          error?: string;
+        }
+      | null;
+    if (!data?.ok) {
+      setAutomationMessage(data?.error ?? "Ingestion run failed.");
       setRunningIngestion(false);
       return;
     }

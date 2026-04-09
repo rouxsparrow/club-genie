@@ -44,4 +44,27 @@ describe('phase 02 tab extraction source files', () => {
     expect(automationSource).toContain('Ingestion Run History');
     expect(automationSource).toContain('Parse Failures');
   });
+
+  it('creates standalone splitwise and emails tab components under src/components/admin', () => {
+    const splitwiseTabPath = projectPath('src/components/admin/splitwise-tab.tsx');
+    const emailsTabPath = projectPath('src/components/admin/emails-tab.tsx');
+
+    expect(existsSync(splitwiseTabPath)).toBe(true);
+    expect(existsSync(emailsTabPath)).toBe(true);
+
+    const splitwiseSource = readFileSync(splitwiseTabPath, 'utf8');
+    const emailsSource = readFileSync(emailsTabPath, 'utf8');
+
+    expect(splitwiseSource).toContain('Splitwise Run History');
+    expect(splitwiseSource).toContain('Group Tools');
+    expect(splitwiseSource).toContain('Splitwise Records');
+    expect(splitwiseSource).toContain('/api/admin/splitwise/run-history');
+    expect(splitwiseSource).toContain('/api/admin/splitwise/expenses');
+
+    expect(emailsSource).toContain('Fetched Email Content');
+    expect(emailsSource).toContain('Load Email Content');
+    expect(emailsSource).toContain('Email Bodies');
+    expect(emailsSource).toContain('Re-run Log');
+    expect(emailsSource).toContain('buildSingleEmailRerunPayload');
+  });
 });

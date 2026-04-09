@@ -31,6 +31,10 @@ export default function EmailsTab() {
     if (emailStatusFilter === "ALL") return emailPreview.messages;
     return emailPreview.messages.filter((message) => message.status === emailStatusFilter);
   }, [emailPreview, emailStatusFilter]);
+  const rerunnableMessageIds = useMemo(
+    () => collectNotIngestedMessageIds(emailPreview?.messages ?? []),
+    [emailPreview],
+  );
 
   const loadEmailPreview = async (options?: { successMessage?: string; preserveRerunResults?: boolean }) => {
     setLoadingEmailPreview(true);
@@ -234,6 +238,8 @@ export default function EmailsTab() {
               const rerunMessageId = message.id.trim();
               const rerunChip = rerunResultByMessageId[rerunMessageId] ?? null;
               const rerunLog = rerunLogByMessageId[rerunMessageId] ?? null;
+              const canRerunMessage =
+                isEmailPreviewRerunnable(message.status) && rerunnableMessageIds.includes(rerunMessageId);
               return (
                 <li
                   key={message.id}
@@ -260,7 +266,7 @@ export default function EmailsTab() {
                             ? "Ingested, No Session"
                             : "Not Ingested"}
                     </span>
-                    {isEmailPreviewRerunnable(message.status) ? (
+                    {canRerunMessage ? (
                       <button
                         type="button"
                         onClick={() => rerunPreviewMessage(rerunMessageId)}

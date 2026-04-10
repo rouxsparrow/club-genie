@@ -10,6 +10,7 @@ type SplitwiseSettings = {
   currency_code: string;
   enabled: boolean;
   shuttlecock_fee?: number;
+  court_conversion_fee_percent?: number;
   description_template?: string;
   date_format?: string;
   location_replacements?: Array<{ from: string; to: string }>;
@@ -56,6 +57,7 @@ export default function SplitwiseTab() {
   const [splitwiseCurrencyInput, setSplitwiseCurrencyInput] = useState("SGD");
   const [splitwiseEnabled, setSplitwiseEnabled] = useState(true);
   const [splitwiseShuttlecockFeeInput, setSplitwiseShuttlecockFeeInput] = useState("4.00");
+  const [splitwiseCourtConversionFeeInput, setSplitwiseCourtConversionFeeInput] = useState("1.00");
   const [splitwiseDescriptionTemplate, setSplitwiseDescriptionTemplate] = useState(
     "Badminton {session_date} - {location}",
   );
@@ -92,6 +94,11 @@ export default function SplitwiseTab() {
     setSplitwiseCurrencyInput(settings.currency_code ?? "SGD");
     setSplitwiseEnabled(Boolean(settings.enabled));
     setSplitwiseShuttlecockFeeInput(typeof settings.shuttlecock_fee === "number" ? settings.shuttlecock_fee.toFixed(2) : "4.00");
+    setSplitwiseCourtConversionFeeInput(
+      typeof settings.court_conversion_fee_percent === "number"
+        ? settings.court_conversion_fee_percent.toFixed(2)
+        : "1.00",
+    );
     setSplitwiseGroupDetailIdInput(String(settings.group_id ?? 0));
     setSplitwiseDescriptionTemplate(
       typeof settings.description_template === "string" && settings.description_template.trim()
@@ -186,6 +193,7 @@ export default function SplitwiseTab() {
         currencyCode: splitwiseCurrencyInput,
         enabled: splitwiseEnabled,
         shuttlecockFee: splitwiseShuttlecockFeeInput,
+        courtConversionFeePercent: splitwiseCourtConversionFeeInput,
         descriptionTemplate: splitwiseDescriptionTemplate,
         dateFormat: splitwiseDateFormat,
         locationReplacements,
@@ -335,7 +343,7 @@ export default function SplitwiseTab() {
         {loadingSplitwise ? (
           <p className="mt-4 text-sm text-slate-500">Loading Splitwise settings...</p>
         ) : (
-          <div className="mt-4 grid gap-4 md:grid-cols-4">
+          <div className="mt-4 grid gap-4 md:grid-cols-5">
             <label className="text-sm font-semibold">
               Group ID
               <input
@@ -376,6 +384,19 @@ export default function SplitwiseTab() {
                 onChange={(event) => setSplitwiseShuttlecockFeeInput(event.target.value)}
                 className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
                 placeholder="4.00"
+              />
+            </label>
+            <label className="text-sm font-semibold">
+              Court Conversion Fee %
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                value={splitwiseCourtConversionFeeInput}
+                onChange={(event) => setSplitwiseCourtConversionFeeInput(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
+                placeholder="1.00"
               />
             </label>
           </div>

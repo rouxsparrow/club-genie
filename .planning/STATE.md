@@ -84,3 +84,9 @@ None yet.
 Last session: 2026-04-10T03:32:10.360Z
 Stopped at: Completed 03-01-PLAN.md
 Resume file: None
+
+## Quick Tasks Completed
+
+| Date | Task | Evidence |
+|------|------|----------|
+| 2026-04-10 | Add configurable COURT-only Splitwise conversion fee (default 1%) | `.planning/quick/260410-j61-add-configurable-1-conversion-fee-to-cou/260410-j61-SUMMARY.md` |

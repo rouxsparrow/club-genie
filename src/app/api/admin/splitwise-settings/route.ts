@@ -7,6 +7,7 @@ type SplitwiseSettings = {
   currency_code: string;
   enabled: boolean;
   shuttlecock_fee?: number;
+  court_conversion_fee_percent?: number;
   description_template?: string;
   date_format?: string;
   location_replacements?: Array<{ from: string; to: string }>;
@@ -15,20 +16,17 @@ type SplitwiseSettings = {
 
 export async function GET() {
   const supabaseAdmin = getSupabaseAdmin();
-  let query = await supabaseAdmin
-    .from("splitwise_settings")
-    .select("id,group_id,currency_code,enabled,shuttlecock_fee,description_template,date_format,location_replacements,updated_at")
-    .eq("id", 1)
-    .maybeSingle();
-  if (query.error) {
+  const selectCandidates = [
+    "id,group_id,currency_code,enabled,shuttlecock_fee,court_conversion_fee_percent,description_template,date_format,location_replacements,updated_at",
+    "id,group_id,currency_code,enabled,shuttlecock_fee,description_template,date_format,location_replacements,updated_at",
+    "id,group_id,currency_code,enabled,description_template,date_format,location_replacements,updated_at",
+  ] as const;
+  let query = await supabaseAdmin.from("splitwise_settings").select(selectCandidates[0]).eq("id", 1).maybeSingle();
+  for (const candidate of selectCandidates.slice(1)) {
+    if (!query.error) break;
     const message = query.error.message ?? "";
-    if (message.includes("shuttlecock_fee")) {
-      query = await supabaseAdmin
-        .from("splitwise_settings")
-        .select("id,group_id,currency_code,enabled,description_template,date_format,location_replacements,updated_at")
-        .eq("id", 1)
-        .maybeSingle();
-    }
+    if (!message.includes("shuttlecock_fee") && !message.includes("court_conversion_fee_percent")) break;
+    query = await supabaseAdmin.from("splitwise_settings").select(candidate).eq("id", 1).maybeSingle();
   }
   const { data, error } = query;
 
@@ -42,6 +40,7 @@ export async function GET() {
     currency_code: "SGD",
     enabled: true,
     shuttlecock_fee: 4,
+    court_conversion_fee_percent: 1,
     description_template: "Badminton {session_date} - {location}",
     date_format: "DD/MM/YY",
     location_replacements: [],
@@ -93,6 +92,7 @@ export async function PATCH(request: Request) {
     currencyCode?: unknown;
     enabled?: unknown;
     shuttlecockFee?: unknown;
+    courtConversionFeePercent?: unknown;
     descriptionTemplate?: unknown;
     dateFormat?: unknown;
     locationReplacements?: unknown;
@@ -133,6 +133,18 @@ export async function PATCH(request: Request) {
     updates.shuttlecock_fee = Number(parsed.toFixed(2));
   }
 
+  if (payload?.courtConversionFeePercent !== undefined) {
+    const raw =
+      typeof payload.courtConversionFeePercent === "string"
+        ? payload.courtConversionFeePercent.trim()
+        : payload.courtConversionFeePercent;
+    const parsed = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return NextResponse.json({ ok: false, error: "courtConversionFeePercent must be zero or a positive number." }, { status: 400 });
+    }
+    updates.court_conversion_fee_percent = Number(parsed.toFixed(2));
+  }
+
   if (payload?.descriptionTemplate !== undefined) {
     const template = typeof payload.descriptionTemplate === "string" ? payload.descriptionTemplate.trim() : "";
     if (!template) {
@@ -168,13 +180,19 @@ export async function PATCH(request: Request) {
   const { data, error } = await supabaseAdmin
     .from("splitwise_settings")
     .upsert(updates, { onConflict: "id" })
-    .select("id,group_id,currency_code,enabled,shuttlecock_fee,description_template,date_format,location_replacements,updated_at")
+    .select("id,group_id,currency_code,enabled,shuttlecock_fee,court_conversion_fee_percent,description_template,date_format,location_replacements,updated_at")
     .single();
 
   if (error) {
     if ((error.message ?? "").includes("shuttlecock_fee")) {
       return NextResponse.json(
         { ok: false, error: "splitwise_settings.shuttlecock_fee missing; apply migration 20260327090000." },
+        { status: 500 }
+      );
+    }
+    if ((error.message ?? "").includes("court_conversion_fee_percent")) {
+      return NextResponse.json(
+        { ok: false, error: "splitwise_settings.court_conversion_fee_percent missing; apply migration 20260410054800." },
         { status: 500 }
       );
     }

@@ -119,3 +119,19 @@ describe('phase 03 shell reduction source contract', () => {
     expect(emailsSource).toContain('onPreviewMessagesChange?.(messages)');
   });
 });
+
+describe('quick splitwise court conversion fee source contract', () => {
+  it('wires court conversion fee through admin settings without applying it to shuttlecock UI', () => {
+    const splitwiseTabSource = readFileSync(projectPath('src/components/admin/splitwise-tab.tsx'), 'utf8');
+    const settingsRouteSource = readFileSync(projectPath('src/app/api/admin/splitwise-settings/route.ts'), 'utf8');
+    const syncSource = readFileSync(projectPath('supabase/functions/run-splitwise-sync/index.ts'), 'utf8');
+
+    expect(splitwiseTabSource).toContain('splitwiseCourtConversionFeeInput');
+    expect(splitwiseTabSource).toContain('Court Conversion Fee %');
+    expect(splitwiseTabSource).toContain('courtConversionFeePercent: splitwiseCourtConversionFeeInput');
+    expect(settingsRouteSource).toContain('court_conversion_fee_percent');
+    expect(settingsRouteSource).toContain('courtConversionFeePercent must be zero or a positive number.');
+    expect(syncSource).toContain('applyPercentageFeeCents(costCents, settings.courtConversionFeePercent)');
+    expect(syncSource).toContain('expenseType: "SHUTTLECOCK"');
+  });
+});

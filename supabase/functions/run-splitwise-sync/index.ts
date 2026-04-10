@@ -3,6 +3,7 @@ import { isAutomationSecretValid } from "../_shared/automation-auth.ts";
 import {
   buildCourtExpenseNote,
   buildShuttlecockExpenseNote,
+  applyPercentageFeeCents,
   buildSplitwiseBySharesPayload,
   buildSplitwiseShuttlecockPayload,
   computeSgtDateWindowLast24h,
@@ -26,6 +27,7 @@ type SplitwiseSettingsRow = {
   date_format?: string | null;
   location_replacements?: unknown;
   shuttlecock_fee?: unknown;
+  court_conversion_fee_percent?: unknown;
 };
 
 type SessionRow = {
@@ -102,16 +104,17 @@ async function requireAutomationSecret(req: Request) {
 
 async function loadSplitwiseSettings(supabase: ReturnType<typeof createClient>) {
   const selectCandidates = [
+    "group_id,currency_code,enabled,description_template,date_format,location_replacements,shuttlecock_fee,court_conversion_fee_percent",
     "group_id,currency_code,enabled,description_template,date_format,location_replacements,shuttlecock_fee",
     "group_id,currency_code,enabled,description_template,date_format,location_replacements"
   ] as const;
 
   let query = await supabase.from("splitwise_settings").select(selectCandidates[0]).eq("id", 1).maybeSingle();
-  if (query.error) {
+  for (const candidate of selectCandidates.slice(1)) {
+    if (!query.error) break;
     const message = query.error.message ?? "";
-    if (message.includes("shuttlecock_fee")) {
-      query = await supabase.from("splitwise_settings").select(selectCandidates[1]).eq("id", 1).maybeSingle();
-    }
+    if (!message.includes("shuttlecock_fee") && !message.includes("court_conversion_fee_percent")) break;
+    query = await supabase.from("splitwise_settings").select(candidate).eq("id", 1).maybeSingle();
   }
 
   const row = (query.data ?? null) as SplitwiseSettingsRow | null;
@@ -131,6 +134,15 @@ async function loadSplitwiseSettings(supabase: ReturnType<typeof createClient>) 
     : [];
 
   const shuttlecockFeeCents = parseMoneyToCents(row?.shuttlecock_fee ?? "4.00") ?? 400;
+  const rawConversionFeePercent = row?.court_conversion_fee_percent;
+  const parsedConversionFeePercent =
+    typeof rawConversionFeePercent === "number"
+      ? rawConversionFeePercent
+      : typeof rawConversionFeePercent === "string"
+        ? Number(rawConversionFeePercent.trim())
+        : 1;
+  const courtConversionFeePercent =
+    Number.isFinite(parsedConversionFeePercent) && parsedConversionFeePercent >= 0 ? parsedConversionFeePercent : 1;
 
   return {
     enabled: typeof row?.enabled === "boolean" ? row.enabled : true,
@@ -145,7 +157,8 @@ async function loadSplitwiseSettings(supabase: ReturnType<typeof createClient>) 
         ? row.date_format.trim()
         : "DD/MM/YY",
     locationReplacements,
-    shuttlecockFeeCents
+    shuttlecockFeeCents,
+    courtConversionFeePercent
   };
 }
 
@@ -661,6 +674,28 @@ Deno.serve(async (req) => {
       }
       continue;
     }
+    const courtCostCents = applyPercentageFeeCents(costCents, settings.courtConversionFeePercent);
+    if (courtCostCents === null || courtCostCents <= 0) {
+      splitwiseFailed += 1;
+      errors.push({
+        session_id: sessionId,
+        session_date: session.session_date,
+        code: "invalid_court_conversion_fee",
+        message: "Set splitwise_settings.court_conversion_fee_percent >= 0."
+      });
+      if (!dryRun) {
+        await markExpenseFailed(
+          supabase,
+          sessionId,
+          "COURT",
+          session.total_fee,
+          "invalid_court_conversion_fee",
+          "Set splitwise_settings.court_conversion_fee_percent >= 0."
+        );
+        await supabase.from("sessions").update({ splitwise_status: "FAILED", updated_at: new Date().toISOString() }).eq("id", sessionId);
+      }
+      continue;
+    }
 
     const payer = await resolvePayerForSession(supabase, session);
     if (!payer.ok) {
@@ -727,7 +762,7 @@ Deno.serve(async (req) => {
       groupId: settings.groupId,
       currencyCode: settings.currencyCode,
       description,
-      costCents,
+      costCents: courtCostCents,
       dateIso,
       payerUserId: payer.splitwiseUserId,
       participantUserIds,
@@ -744,12 +779,16 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    const courtAmount = Number((costCents / 100).toFixed(2));
+    const courtAmount = Number((courtCostCents / 100).toFixed(2));
+    const courtConversionFeeCents = courtCostCents - costCents;
     (courtBuilt.payload as Record<string, unknown>).details = buildCourtExpenseNote({
       totalCostCents: costCents,
       joinedPlayersCount: participants.length,
       guestCount,
-      sessionPayerLabel: payerLabel
+      sessionPayerLabel: payerLabel,
+      conversionFeePercent: settings.courtConversionFeePercent,
+      conversionFeeCents: courtConversionFeeCents,
+      totalWithConversionFeeCents: courtCostCents
     });
     const courtCreated = await processExpenseCreation({
       supabase,

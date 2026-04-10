@@ -56,6 +56,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Splitwise share math includes guest shares and assigns those guest shares to the resolved session payer.
 - Players include a `shuttlecock_paid` flag for Splitwise shuttlecock redistribution logic.
 - Splitwise sync creates up to two expenses per CLOSED session: `COURT` (normal court fee) and optional `SHUTTLECOCK`.
+- Splitwise `COURT` expense amount includes a configurable conversion fee percent from Admin Splitwise settings (`splitwise_settings.court_conversion_fee_percent`, default `1.00`); this fee must not be applied to `SHUTTLECOCK` expenses.
 - Splitwise `SHUTTLECOCK` expense charges each session participant with `shuttlecock_paid=false` plus session guest shares (guest shares assigned to session payer) using a configurable per-session shuttlecock fee, then redistributes that total across all active players with `shuttlecock_paid=true` and valid Splitwise mapping.
 - Shuttlecock fee amount is configurable in Admin Splitwise settings (`splitwise_settings.shuttlecock_fee`, default `4.00`).
 - Splitwise expense payload includes multi-line `details` notes for audit context (totals, counts, resolved session payer), and Admin Splitwise Records expose that note from local stored payload.

@@ -106,6 +106,12 @@ export function centsToMoneyString(cents: number) {
   return `${whole}.${String(frac).padStart(2, "0")}`;
 }
 
+export function applyPercentageFeeCents(costCents: number, feePercent: number) {
+  if (!Number.isInteger(costCents) || costCents <= 0) return null;
+  if (!Number.isFinite(feePercent) || feePercent < 0) return null;
+  return Math.round(costCents * (1 + feePercent / 100));
+}
+
 export function computeEqualOwedSharesCents(costCents: number, participantUserIds: number[]) {
   const uniqueSorted = [...new Set(participantUserIds)].sort((a, b) => a - b);
   if (uniqueSorted.length === 0) return null;
@@ -275,15 +281,30 @@ export function buildCourtExpenseNote(input: {
   joinedPlayersCount: number;
   guestCount: number;
   sessionPayerLabel: string;
+  conversionFeePercent?: number;
+  conversionFeeCents?: number;
+  totalWithConversionFeeCents?: number;
 }) {
   const payer = trimOrNull(input.sessionPayerLabel) ?? "Unknown";
   const guests = Number.isInteger(input.guestCount) && input.guestCount > 0 ? input.guestCount : 0;
   const joined = Number.isInteger(input.joinedPlayersCount) && input.joinedPlayersCount > 0 ? input.joinedPlayersCount : 0;
-  return [
+  const lines = [
     `Total: ${centsToMoneyString(input.totalCostCents)}`,
     `Joined players: ${joined}, Guests: ${guests}`,
     `Session payer: ${payer}`
-  ].join("\n");
+  ];
+  if (
+    typeof input.conversionFeePercent === "number" &&
+    typeof input.conversionFeeCents === "number" &&
+    typeof input.totalWithConversionFeeCents === "number" &&
+    input.conversionFeeCents > 0
+  ) {
+    lines.push(
+      `Conversion fee: ${input.conversionFeePercent.toFixed(2)}% (${centsToMoneyString(input.conversionFeeCents)})`,
+      `Total with conversion fee: ${centsToMoneyString(input.totalWithConversionFeeCents)}`
+    );
+  }
+  return lines.join("\n");
 }
 
 export function buildShuttlecockExpenseNote(input: {

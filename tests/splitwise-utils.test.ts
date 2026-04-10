@@ -4,6 +4,7 @@ import {
   buildShuttlecockExpenseNote,
   buildSplitwiseBySharesPayload,
   buildSplitwiseShuttlecockPayload,
+  applyPercentageFeeCents,
   centsToMoneyString,
   computeSgtDateWindowLast24h,
   parseMoneyToCents,
@@ -26,6 +27,13 @@ describe("splitwise utils", () => {
     expect(centsToMoneyString(1)).toBe("0.01");
     expect(centsToMoneyString(2900)).toBe("29.00");
     expect(centsToMoneyString(2910)).toBe("29.10");
+  });
+
+  it("applies percentage fees to cents with cent rounding", () => {
+    expect(applyPercentageFeeCents(10000, 1)).toBe(10100);
+    expect(applyPercentageFeeCents(9999, 1)).toBe(10099);
+    expect(applyPercentageFeeCents(10000, 0)).toBe(10000);
+    expect(applyPercentageFeeCents(10000, -1)).toBeNull();
   });
 
   it("computes SGT last-24h window date strings deterministically", () => {
@@ -271,6 +279,19 @@ describe("splitwise utils", () => {
       sessionPayerLabel: "Alex"
     });
     expect(courtNote).toBe("Total: 88.00\nJoined players: 8, Guests: 2\nSession payer: Alex");
+
+    const courtNoteWithFee = buildCourtExpenseNote({
+      totalCostCents: 10000,
+      joinedPlayersCount: 4,
+      guestCount: 0,
+      sessionPayerLabel: "Alex",
+      conversionFeePercent: 1,
+      conversionFeeCents: 100,
+      totalWithConversionFeeCents: 10100
+    });
+    expect(courtNoteWithFee).toBe(
+      "Total: 100.00\nJoined players: 4, Guests: 0\nSession payer: Alex\nConversion fee: 1.00% (1.00)\nTotal with conversion fee: 101.00"
+    );
 
     const shuttleNote = buildShuttlecockExpenseNote({
       totalCostCents: 1600,

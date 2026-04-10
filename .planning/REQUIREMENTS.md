@@ -16,7 +16,7 @@
 
 ### Shell Reduction
 
-- [ ] **SHELL-01**: Admin page.tsx reduced to a thin composition shell (tab routing + component mounting)
+- [x] **SHELL-01**: Admin page.tsx reduced to a thin composition shell (tab routing + component mounting)
 - [x] **SHELL-02**: Shared types extracted into `src/components/admin/types.ts`
 - [x] **SHELL-03**: Shared admin utilities (common fetch patterns, error handling) extracted into reusable hooks
 
@@ -28,7 +28,7 @@
 - [ ] **PARITY-04**: All Splitwise tab operations work identically after extraction
 - [ ] **PARITY-05**: All Accounts tab operations work identically after extraction
 - [ ] **PARITY-06**: All Emails tab operations work identically after extraction
-- [ ] **PARITY-07**: Tab navigation and URL state preserved
+- [x] **PARITY-07**: Tab navigation and URL state preserved
 
 ## v2 Requirements
 
@@ -73,8 +73,8 @@
 | PARITY-04 | Phase 2 | Pending |
 | PARITY-05 | Phase 2 | Pending |
 | PARITY-06 | Phase 2 | Pending |
-| SHELL-01 | Phase 3 | Pending |
-| PARITY-07 | Phase 3 | Pending |
+| SHELL-01 | Phase 3 | Complete |
+| PARITY-07 | Phase 3 | Complete |
 
 **Coverage:**
 - v1 requirements: 16 total

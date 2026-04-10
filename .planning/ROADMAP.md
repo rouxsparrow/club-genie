@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Shared Foundation** - Extract shared types and utility hooks from page.tsx so tab components have a clean API surface
 - [x] **Phase 2: Tab Extraction** - Extract all 6 admin tabs into independent components with full behavior parity
-- [ ] **Phase 3: Shell Reduction** - Reduce page.tsx to a thin composition shell that mounts tab components
+- [x] **Phase 3: Shell Reduction** - Reduce page.tsx to a thin composition shell that mounts tab components
 
 ## Phase Details
 
@@ -62,7 +62,7 @@ Plans:
 **UI hint**: yes
 
 Plans:
-- [ ] 03-01-PLAN.md -- Extract shared admin tab-shell helpers so page.tsx stays under 150 lines while preserving current local tab navigation semantics
+- [x] 03-01-PLAN.md -- Extract shared admin tab-shell helpers so page.tsx stays under 150 lines while preserving current local tab navigation semantics
 
 ## Progress
 
@@ -73,7 +73,7 @@ Phases execute in numeric order: 1 -> 2 -> 3
 |-------|----------------|--------|-----------|
 | 1. Shared Foundation | 2/2 | Complete | 2026-04-08 |
 | 2. Tab Extraction | 3/3 | Complete | 2026-04-09 |
-| 3. Shell Reduction | 0/1 | Not started | - |
+| 3. Shell Reduction | 1/1 | Complete | 2026-04-10 |
 
 ### Phase 4: Admin page redesign only
 

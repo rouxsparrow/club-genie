@@ -16,7 +16,11 @@ type EmailPreviewResult = {
   messages: EmailPreviewMessage[];
 };
 
-export default function EmailsTab() {
+type EmailsTabProps = {
+  onPreviewMessagesChange?: (messages: EmailPreviewMessage[]) => void;
+};
+
+export default function EmailsTab({ onPreviewMessagesChange }: EmailsTabProps) {
   const [previewQueryInput, setPreviewQueryInput] = useState("");
   const [loadingEmailPreview, setLoadingEmailPreview] = useState(false);
   const [emailPreviewMessage, setEmailPreviewMessage] = useState<string | null>(null);
@@ -59,11 +63,13 @@ export default function EmailsTab() {
       return;
     }
 
+    const messages = Array.isArray(data.messages) ? data.messages : [];
     setEmailPreview({
       query: data.query ?? null,
       timezone: data.timezone ?? null,
-      messages: Array.isArray(data.messages) ? data.messages : [],
+      messages,
     });
+    onPreviewMessagesChange?.(messages);
     setEmailPreviewMessage(options?.successMessage ?? "Email preview loaded.");
     setLoadingEmailPreview(false);
   };

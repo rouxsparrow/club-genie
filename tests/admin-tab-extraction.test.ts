@@ -105,4 +105,17 @@ describe('phase 03 shell reduction source contract', () => {
     expect(pageSource).not.toContain('<AccountsTab />');
     expect(pageSource).not.toContain('<SplitwiseTab />');
   });
+
+  it('passes email preview messages through the shell for automation manual ingestion parity', () => {
+    const pageSource = readFileSync(pagePath, 'utf8');
+    const shellSource = readFileSync(projectPath('src/components/admin/admin-tab-shell.tsx'), 'utf8');
+    const emailsSource = readFileSync(projectPath('src/components/admin/emails-tab.tsx'), 'utf8');
+
+    expect(pageSource).toContain('useState<EmailPreviewMessage[]>([])');
+    expect(pageSource).toContain('emailPreviewMessages');
+    expect(pageSource).toContain('onEmailPreviewMessagesChange: setEmailPreviewMessages');
+    expect(shellSource).toContain('<AutomationTab previewMessages={options.emailPreviewMessages} />');
+    expect(shellSource).toContain('<EmailsTab onPreviewMessagesChange={options.onEmailPreviewMessagesChange} />');
+    expect(emailsSource).toContain('onPreviewMessagesChange?.(messages)');
+  });
 });

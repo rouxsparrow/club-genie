@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { renderAdminTabNav, renderAdminTabPanels } from "../../components/admin/admin-tab-shell";
-import type { TabKey } from "../../components/admin/types";
+import type { EmailPreviewMessage, TabKey } from "../../components/admin/types";
 import AdminNavbar from "../../components/admin-navbar";
 import AnimatedBackground from "../../components/v2/AnimatedBackground";
 import "../globals-v2.css";
@@ -10,6 +10,7 @@ import "../globals-v2.css";
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("players");
   const [mounted, setMounted] = useState(false);
+  const [emailPreviewMessages, setEmailPreviewMessages] = useState<EmailPreviewMessage[]>([]);
   const eagerMountedTabs: TabKey[] = ["players", "club", "automation", "splitwise"];
   const [visitedTabs, setVisitedTabs] = useState<Record<TabKey, boolean>>({
     accounts: false,
@@ -57,7 +58,10 @@ export default function AdminPage() {
         </header>
 
         {renderAdminTabNav(activeTab, setActiveTab)}
-        {renderAdminTabPanels(activeTab, keepMounted)}
+        {renderAdminTabPanels(activeTab, keepMounted, {
+          emailPreviewMessages,
+          onEmailPreviewMessagesChange: setEmailPreviewMessages,
+        })}
       </div>
     </main>
   );

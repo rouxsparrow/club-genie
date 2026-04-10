@@ -7,13 +7,18 @@ import ClubAccessTab from "./club-access-tab";
 import EmailsTab from "./emails-tab";
 import PlayersTab from "./players-tab";
 import SplitwiseTab from "./splitwise-tab";
-import type { TabKey } from "./types";
+import type { EmailPreviewMessage, TabKey } from "./types";
 
 type AdminTabDefinition = {
   key: TabKey;
   label: string;
   eager: boolean;
   component: ComponentType;
+};
+
+type AdminTabShellOptions = {
+  emailPreviewMessages: EmailPreviewMessage[];
+  onEmailPreviewMessagesChange: (messages: EmailPreviewMessage[]) => void;
 };
 
 const ADMIN_TABS: AdminTabDefinition[] = [
@@ -48,12 +53,24 @@ export function renderAdminTabNav(activeTab: TabKey, setActiveTab: Dispatch<SetS
   );
 }
 
-export function renderAdminTabPanels(activeTab: TabKey, keepMounted: (tab: TabKey) => boolean) {
-  return ADMIN_TABS.map(({ key, component: Component }) =>
-    keepMounted(key) ? (
+export function renderAdminTabPanels(
+  activeTab: TabKey,
+  keepMounted: (tab: TabKey) => boolean,
+  options: AdminTabShellOptions,
+) {
+  return ADMIN_TABS.map(({ key, component: Component }) => {
+    if (!keepMounted(key)) return null;
+
+    return (
       <div key={key} hidden={activeTab !== key} aria-hidden={activeTab !== key}>
-        <Component />
+        {key === "automation" ? (
+          <AutomationTab previewMessages={options.emailPreviewMessages} />
+        ) : key === "emails" ? (
+          <EmailsTab onPreviewMessagesChange={options.onEmailPreviewMessagesChange} />
+        ) : (
+          <Component />
+        )}
       </div>
-    ) : null,
-  );
+    );
+  });
 }

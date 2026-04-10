@@ -7,12 +7,12 @@
 
 ### Component Extraction
 
-- [ ] **COMP-01**: Players tab extracted into `src/components/admin/players-tab.tsx` with own state and API calls
-- [ ] **COMP-02**: Club Access tab extracted into `src/components/admin/club-access-tab.tsx` with own state and API calls
-- [ ] **COMP-03**: Automation tab extracted into `src/components/admin/automation-tab.tsx` with own state and API calls
-- [ ] **COMP-04**: Splitwise tab extracted into `src/components/admin/splitwise-tab.tsx` with own state and API calls
-- [ ] **COMP-05**: Accounts tab migrated to `src/components/admin/accounts-tab.tsx` (building on existing `admin-accounts-panel.tsx`)
-- [ ] **COMP-06**: Emails tab extracted into `src/components/admin/emails-tab.tsx` with own state and API calls
+- [x] **COMP-01**: Players tab extracted into `src/components/admin/players-tab.tsx` with own state and API calls
+- [x] **COMP-02**: Club Access tab extracted into `src/components/admin/club-access-tab.tsx` with own state and API calls
+- [x] **COMP-03**: Automation tab extracted into `src/components/admin/automation-tab.tsx` with own state and API calls
+- [x] **COMP-04**: Splitwise tab extracted into `src/components/admin/splitwise-tab.tsx` with own state and API calls
+- [x] **COMP-05**: Accounts tab migrated to `src/components/admin/accounts-tab.tsx` (building on existing `admin-accounts-panel.tsx`)
+- [x] **COMP-06**: Emails tab extracted into `src/components/admin/emails-tab.tsx` with own state and API calls
 
 ### Shell Reduction
 
@@ -22,12 +22,12 @@
 
 ### Behavior Parity
 
-- [ ] **PARITY-01**: All Players tab operations work identically after extraction
-- [ ] **PARITY-02**: All Club Access tab operations work identically after extraction
-- [ ] **PARITY-03**: All Automation tab operations work identically after extraction
-- [ ] **PARITY-04**: All Splitwise tab operations work identically after extraction
-- [ ] **PARITY-05**: All Accounts tab operations work identically after extraction
-- [ ] **PARITY-06**: All Emails tab operations work identically after extraction
+- [x] **PARITY-01**: All Players tab operations work identically after extraction
+- [x] **PARITY-02**: All Club Access tab operations work identically after extraction
+- [x] **PARITY-03**: All Automation tab operations work identically after extraction
+- [x] **PARITY-04**: All Splitwise tab operations work identically after extraction
+- [x] **PARITY-05**: All Accounts tab operations work identically after extraction
+- [x] **PARITY-06**: All Emails tab operations work identically after extraction
 - [x] **PARITY-07**: Tab navigation and URL state preserved
 
 ## v2 Requirements
@@ -61,18 +61,18 @@
 |-------------|-------|--------|
 | SHELL-02 | Phase 1 | Complete |
 | SHELL-03 | Phase 1 | Complete |
-| COMP-01 | Phase 2 | Pending |
-| COMP-02 | Phase 2 | Pending |
-| COMP-03 | Phase 2 | Pending |
-| COMP-04 | Phase 2 | Pending |
-| COMP-05 | Phase 2 | Pending |
-| COMP-06 | Phase 2 | Pending |
-| PARITY-01 | Phase 2 | Pending |
-| PARITY-02 | Phase 2 | Pending |
-| PARITY-03 | Phase 2 | Pending |
-| PARITY-04 | Phase 2 | Pending |
-| PARITY-05 | Phase 2 | Pending |
-| PARITY-06 | Phase 2 | Pending |
+| COMP-01 | Phase 2 | Complete |
+| COMP-02 | Phase 2 | Complete |
+| COMP-03 | Phase 2 | Complete |
+| COMP-04 | Phase 2 | Complete |
+| COMP-05 | Phase 2 | Complete |
+| COMP-06 | Phase 2 | Complete |
+| PARITY-01 | Phase 2 | Complete |
+| PARITY-02 | Phase 2 | Complete |
+| PARITY-03 | Phase 2 | Complete |
+| PARITY-04 | Phase 2 | Complete |
+| PARITY-05 | Phase 2 | Complete |
+| PARITY-06 | Phase 2 | Complete |
 | SHELL-01 | Phase 3 | Complete |
 | PARITY-07 | Phase 3 | Complete |
 

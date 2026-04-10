@@ -74,13 +74,3 @@ Phases execute in numeric order: 1 -> 2 -> 3
 | 1. Shared Foundation | 2/2 | Complete | 2026-04-08 |
 | 2. Tab Extraction | 3/3 | Complete | 2026-04-09 |
 | 3. Shell Reduction | 1/1 | Complete | 2026-04-10 |
-
-### Phase 4: Admin page redesign only
-
-**Goal:** [To be planned]
-**Requirements**: TBD
-**Depends on:** Phase 3
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd-plan-phase 4 to break down)

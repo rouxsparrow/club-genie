@@ -32,6 +32,7 @@ type SplitwiseSettingsRow = {
 
 type SessionRow = {
   id: string;
+  club_id?: string | null;
   session_date: string;
   status: string;
   splitwise_status?: string | null;
@@ -162,18 +163,97 @@ async function loadSplitwiseSettings(supabase: ReturnType<typeof createClient>) 
   };
 }
 
-async function loadDefaultPayer(supabase: ReturnType<typeof createClient>) {
+async function loadSplitwiseSettingsForClub(supabase: ReturnType<typeof createClient>, clubId: string) {
+  const selectCandidates = [
+    "group_id,currency_code,enabled,description_template,date_format,location_replacements,shuttlecock_fee,court_conversion_fee_percent",
+    "group_id,currency_code,enabled,description_template,date_format,location_replacements,shuttlecock_fee",
+    "group_id,currency_code,enabled,description_template,date_format,location_replacements"
+  ] as const;
+
+  let query = await supabase
+    .from("club_splitwise_settings")
+    .select(selectCandidates[0])
+    .eq("club_id", clubId)
+    .maybeSingle();
+  for (const candidate of selectCandidates.slice(1)) {
+    if (!query.error) break;
+    const message = query.error.message ?? "";
+    if (!message.includes("shuttlecock_fee") && !message.includes("court_conversion_fee_percent")) break;
+    query = await supabase
+      .from("club_splitwise_settings")
+      .select(candidate)
+      .eq("club_id", clubId)
+      .maybeSingle();
+  }
+
+  if (query.error) {
+    const message = query.error.message ?? "";
+    if (message.includes("club_splitwise_settings")) {
+      // Backward compatibility: fallback to singleton.
+      return await loadSplitwiseSettings(supabase);
+    }
+    throw new Error("splitwise_settings_lookup_failed");
+  }
+
+  const row = (query.data ?? null) as SplitwiseSettingsRow | null;
+  const locationReplacementsRaw = row?.location_replacements;
+  const locationReplacements =
+    Array.isArray(locationReplacementsRaw) ?
+      locationReplacementsRaw
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") return null;
+          const record = entry as Record<string, unknown>;
+          const from = typeof record.from === "string" ? record.from.trim() : "";
+          const to = typeof record.to === "string" ? record.to.trim() : "";
+          if (!from || !to) return null;
+          return { from, to };
+        })
+        .filter((v): v is { from: string; to: string } => Boolean(v))
+    : [];
+
+  const shuttlecockFeeCents = parseMoneyToCents(row?.shuttlecock_fee ?? "4.00") ?? 400;
+  const rawConversionFeePercent = row?.court_conversion_fee_percent;
+  const parsedConversionFeePercent =
+    typeof rawConversionFeePercent === "number"
+      ? rawConversionFeePercent
+      : typeof rawConversionFeePercent === "string"
+        ? Number(rawConversionFeePercent.trim())
+        : 1;
+  const courtConversionFeePercent =
+    Number.isFinite(parsedConversionFeePercent) && parsedConversionFeePercent >= 0 ? parsedConversionFeePercent : 1;
+
+  return {
+    enabled: typeof row?.enabled === "boolean" ? row.enabled : true,
+    groupId: typeof row?.group_id === "number" ? row.group_id : 0,
+    currencyCode: typeof row?.currency_code === "string" && row.currency_code.trim() ? row.currency_code.trim() : "SGD",
+    descriptionTemplate:
+      typeof row?.description_template === "string" && row.description_template.trim()
+        ? row.description_template.trim()
+        : "Badminton {session_date} - {location}",
+    dateFormat:
+      typeof row?.date_format === "string" && row.date_format.trim()
+        ? row.date_format.trim()
+        : "DD/MM/YY",
+    locationReplacements,
+    shuttlecockFeeCents,
+    courtConversionFeePercent
+  };
+}
+
+async function loadDefaultPayer(supabase: ReturnType<typeof createClient>, clubId: string) {
   const { data, error } = await supabase
-    .from("players")
-    .select("id, name, splitwise_user_id")
+    .from("club_players")
+    .select("player:players(id,name,splitwise_user_id)")
+    .eq("club_id", clubId)
     .eq("is_default_payer", true)
     .limit(2);
 
   if (error) throw new Error("payer_lookup_failed");
-  const rows = (data ?? []) as Array<{ id: string; name: string | null; splitwise_user_id: number | null }>;
-  if (rows.length === 0) return { ok: false as const, error: "missing_default_payer" };
-  if (rows.length > 1) return { ok: false as const, error: "multiple_default_payers" };
-  const payer = rows[0];
+  const rows = (data ?? []) as Array<{ player?: { id: string; name: string | null; splitwise_user_id: number | null } | null }>;
+  const payerRows = rows.map((row) => row.player).filter(Boolean) as Array<{ id: string; name: string | null; splitwise_user_id: number | null }>;
+  if (payerRows.length === 0) return { ok: false as const, error: "missing_default_payer" };
+  if (payerRows.length > 1) return { ok: false as const, error: "multiple_default_payers" };
+  const payer = payerRows[0];
   if (typeof payer.splitwise_user_id !== "number") return { ok: false as const, error: "payer_missing_splitwise_user_id" };
   return { ok: true as const, playerId: payer.id, playerName: payer.name ?? null, splitwiseUserId: payer.splitwise_user_id };
 }
@@ -209,74 +289,74 @@ async function resolvePayerForSession(supabase: ReturnType<typeof createClient>,
     return { ...payer, source: "session" as const };
   }
 
-  const fallback = await loadDefaultPayer(supabase);
+  const clubId = typeof session.club_id === "string" && session.club_id.trim() ? session.club_id.trim() : null;
+  if (!clubId) return { ok: false as const, error: "missing_club_id" };
+  const fallback = await loadDefaultPayer(supabase, clubId);
   if (!fallback.ok) return fallback;
   return { ...fallback, source: "default" as const };
 }
 
-async function loadParticipants(supabase: ReturnType<typeof createClient>, sessionId: string) {
-  const selectCandidates = [
-    "player:players(id,name,splitwise_user_id,shuttlecock_paid)",
-    "player:players(id,name,splitwise_user_id)"
-  ] as const;
-
-  let query = await supabase
+async function loadParticipants(supabase: ReturnType<typeof createClient>, clubId: string, sessionId: string) {
+  const query = await supabase
     .from("session_participants")
-    .select(selectCandidates[0])
+    .select("player_id, player:players(id,name,splitwise_user_id)")
     .eq("session_id", sessionId);
-  if (query.error) {
-    const message = query.error.message ?? "";
-    if (message.includes("shuttlecock_paid")) {
-      query = await supabase
-        .from("session_participants")
-        .select(selectCandidates[1])
-        .eq("session_id", sessionId);
-    }
-  }
 
   if (query.error) throw new Error("participants_lookup_failed");
 
   const rows = (query.data ?? []) as Array<{
-    player:
-      | {
-          id: string;
-          name: string;
-          splitwise_user_id: number | null;
-          shuttlecock_paid?: boolean | null;
-        }
-      | null;
+    player_id: string;
+    player: { id?: string; name?: string; splitwise_user_id?: number | null } | null;
   }>;
 
-  return rows
+  const participantPlayers = rows
     .map((row) => row.player)
-    .filter((p): p is { id: string; name: string; splitwise_user_id: number | null; shuttlecock_paid?: boolean | null } => Boolean(p))
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      splitwise_user_id: p.splitwise_user_id,
-      shuttlecock_paid: p.shuttlecock_paid === true
-    })) as SessionParticipantRow[];
+    .filter((p): p is { id: string; name: string; splitwise_user_id: number | null } => Boolean(p && typeof p.id === "string" && typeof p.name === "string"))
+    .map((p) => ({ id: p.id, name: p.name, splitwise_user_id: typeof p.splitwise_user_id === "number" ? p.splitwise_user_id : null }));
+
+  const ids = participantPlayers.map((p) => p.id);
+  if (ids.length === 0) return [] as SessionParticipantRow[];
+
+  const { data: flags, error: flagsError } = await supabase
+    .from("club_players")
+    .select("player_id, shuttlecock_paid")
+    .eq("club_id", clubId)
+    .in("player_id", ids);
+
+  if (flagsError) throw new Error("participants_lookup_failed");
+  const paidMap = new Map<string, boolean>();
+  (flags ?? []).forEach((row) => {
+    paidMap.set(row.player_id, row.shuttlecock_paid === true);
+  });
+
+  return participantPlayers.map((p) => ({
+    id: p.id,
+    name: p.name,
+    splitwise_user_id: p.splitwise_user_id,
+    shuttlecock_paid: paidMap.get(p.id) === true
+  })) as SessionParticipantRow[];
 }
 
-async function loadActiveShuttlecockRecipients(supabase: ReturnType<typeof createClient>) {
+async function loadActiveShuttlecockRecipients(supabase: ReturnType<typeof createClient>, clubId: string) {
   const query = await supabase
-    .from("players")
-    .select("id,splitwise_user_id,active,shuttlecock_paid")
+    .from("club_players")
+    .select("player:players(id,splitwise_user_id)")
+    .eq("club_id", clubId)
     .eq("active", true)
     .eq("shuttlecock_paid", true);
 
   if (query.error) {
     const message = query.error.message ?? "";
-    if (message.includes("shuttlecock_paid")) {
-      // Backward compatibility (pre-migration): no recipients.
+    if (message.includes("club_players") || message.includes("shuttlecock_paid")) {
       return [] as ActiveOnRecipientRow[];
     }
     throw new Error("shuttlecock_recipient_lookup_failed");
   }
 
-  const rows = (query.data ?? []) as Array<{ id: string; splitwise_user_id: number | null }>;
+  const rows = (query.data ?? []) as Array<{ player?: { id: string; splitwise_user_id: number | null } | null }>;
   return rows
-    .filter((row): row is { id: string; splitwise_user_id: number } => typeof row.splitwise_user_id === "number")
+    .map((row) => row.player)
+    .filter((row): row is { id: string; splitwise_user_id: number } => Boolean(row && typeof row.splitwise_user_id === "number"))
     .map((row) => ({ id: row.id, splitwise_user_id: row.splitwise_user_id }));
 }
 
@@ -530,15 +610,9 @@ Deno.serve(async (req) => {
     return json(statusCode, payload);
   };
 
-  const settings = await loadSplitwiseSettings(supabase);
   const apiKey = Deno.env.get("SPLITWISE_API_KEY") ?? null;
-
-  let activeOnRecipients: ActiveOnRecipientRow[] = [];
-  try {
-    activeOnRecipients = await loadActiveShuttlecockRecipients(supabase);
-  } catch {
-    return await respondWithHistory(500, { ok: false, error: "shuttlecock_recipient_lookup_failed" }, "FAILED", "shuttlecock_recipient_lookup_failed");
-  }
+  const settingsByClub = new Map<string, Awaited<ReturnType<typeof loadSplitwiseSettingsForClub>>>();
+  const activeOnRecipientsByClub = new Map<string, ActiveOnRecipientRow[]>();
 
   if (!dryRun && !sessionIds) {
     const { data: openSessions, error: openError } = await supabase
@@ -571,8 +645,8 @@ Deno.serve(async (req) => {
   }
 
   const candidateSelects = [
-    "id,session_date,status,splitwise_status,payer_player_id,guest_count,total_fee,location,start_time,end_time",
-    "id,session_date,status,splitwise_status,payer_player_id,total_fee,location,start_time,end_time"
+    "id,club_id,session_date,status,splitwise_status,payer_player_id,guest_count,total_fee,location,start_time,end_time",
+    "id,club_id,session_date,status,splitwise_status,payer_player_id,total_fee,location,start_time,end_time"
   ] as const;
 
   let candidatesResult = await supabase
@@ -628,6 +702,36 @@ Deno.serve(async (req) => {
   for (const session of sessions) {
     const sessionId = session.id;
     if (!sessionId) continue;
+    const clubId = typeof session.club_id === "string" && session.club_id.trim() ? session.club_id.trim() : null;
+    if (!clubId) {
+      splitwiseFailed += 1;
+      await supabase.from("sessions").update({ splitwise_status: "FAILED", updated_at: new Date().toISOString() }).eq("id", sessionId);
+      errors.push({ session_id: sessionId, session_date: session.session_date, code: "missing_club_id", message: "Session missing club_id." });
+      continue;
+    }
+
+    let settings = settingsByClub.get(clubId) ?? null;
+    if (!settings) {
+      try {
+        settings = await loadSplitwiseSettingsForClub(supabase, clubId);
+        settingsByClub.set(clubId, settings);
+      } catch {
+        splitwiseFailed += 1;
+        await supabase.from("sessions").update({ splitwise_status: "FAILED", updated_at: new Date().toISOString() }).eq("id", sessionId);
+        errors.push({ session_id: sessionId, session_date: session.session_date, code: "splitwise_settings_lookup_failed", message: "Failed to load Splitwise settings for club." });
+        continue;
+      }
+    }
+
+    let activeOnRecipients = activeOnRecipientsByClub.get(clubId) ?? null;
+    if (!activeOnRecipients) {
+      try {
+        activeOnRecipients = await loadActiveShuttlecockRecipients(supabase, clubId);
+        activeOnRecipientsByClub.set(clubId, activeOnRecipients);
+      } catch {
+        return await respondWithHistory(500, { ok: false, error: "shuttlecock_recipient_lookup_failed" }, "FAILED", "shuttlecock_recipient_lookup_failed");
+      }
+    }
 
     let sessionHasFailure = false;
     let sessionHasInProgress = false;
@@ -712,7 +816,7 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    const participants = await loadParticipants(supabase, sessionId);
+    const participants = await loadParticipants(supabase, clubId, sessionId);
     if (participants.length === 0) {
       splitwiseFailed += 1;
       errors.push({ session_id: sessionId, session_date: session.session_date, code: "missing_participants", message: "No participants joined." });

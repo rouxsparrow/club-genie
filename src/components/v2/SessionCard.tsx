@@ -21,6 +21,7 @@ export interface Session {
   startTime: string;
   endTime: string;
   location: string;
+  clubName?: string | null;
   status: "open" | "full" | "closed" | "draft";
   participantCount: number;
   maxParticipants?: number;
@@ -175,7 +176,14 @@ export default function SessionCard({
 
         <div className="v2-location-wrap">
           <MapPin size={14} className="v2-location-icon mt-0.5 shrink-0" />
-          <span className="v2-location-text">{session.location}</span>
+          <span className="v2-location-text">
+            {session.clubName ? (
+              <span className="mr-2 inline-flex items-center rounded-full border border-slate-200/70 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:border-ink-700/60 dark:bg-ink-900/30 dark:text-slate-200">
+                {session.clubName}
+              </span>
+            ) : null}
+            {session.location}
+          </span>
         </div>
 
         <div className="v2-courts-row">

@@ -6,7 +6,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 ## Non-Goals
 - Real-time court availability or booking.
 - Payments collection or refunds.
-- Multi-club support or complex roles.
+- Complex roles.
 
 ## Personas
 - Public Player: views sessions and registers multiple players.
@@ -47,6 +47,7 @@ Automate badminton club session management by ingesting Playtomic receipts, publ
 - Admin can manage admin accounts (create/update/deactivate/reset password) and change own password.
 - Session closing cron creates Splitwise expenses and marks sessions CLOSED, idempotently.
 - Sessions display participants as avatar circles only (including guest indicator when guests are added); participant names are not expanded on card tap.
+- Multi-club support: players can belong to multiple clubs and see sessions across all clubs they have joined.
 - Sessions page tabs use `Upcoming` and `Past` filters: public users see `OPEN/FULL` in Upcoming and `CLOSED` in Past; admin users also see `DRAFT` sessions in Past for fix workflows.
 - Keep `/sessions` on the current V2 experience; preserve the pre-V2 Sessions UI at `/sessions-legacy` for fallback/reference without changing primary user flow.
 - Join/Withdraw player picker shows avatar + name rows.

@@ -1,32 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { resolveClubFromToken } from "../_shared/club-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, apikey, x-club-token, content-type"
 };
 
-const encoder = new TextEncoder();
-
-function toHex(buffer: ArrayBuffer) {
-  return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function timingSafeEqual(a: string, b: string) {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}
-
-async function hashToken(token: string) {
-  const data = encoder.encode(token);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return toHex(digest);
-}
 
 async function getSupabaseClient() {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -42,20 +21,8 @@ async function getSupabaseClient() {
 }
 
 async function validateClubToken(supabase: ReturnType<typeof createClient>, token: string) {
-  const { data, error } = await supabase
-    .from("club_settings")
-    .select("token_hash")
-    .order("token_version", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data?.token_hash) {
-    return false;
-  }
-
-  const incomingHash = await hashToken(token);
-  return timingSafeEqual(incomingHash, data.token_hash);
+  const resolved = await resolveClubFromToken(supabase, token);
+  return resolved.ok ? resolved : null;
 }
 
 function parseGuestCount(value: unknown) {
@@ -108,8 +75,8 @@ Deno.serve(async (req) => {
     });
   }
 
-  const valid = await validateClubToken(supabase, token);
-  if (!valid) {
+  const resolved = await validateClubToken(supabase, token);
+  if (!resolved) {
     return new Response(JSON.stringify({ ok: false }), {
       status: 403,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -151,6 +118,7 @@ Deno.serve(async (req) => {
     .from("sessions")
     .select("id,status")
     .eq("id", sessionId)
+    .eq("club_id", resolved.clubId)
     .maybeSingle();
 
   if (sessionError || !session) {
@@ -168,11 +136,12 @@ Deno.serve(async (req) => {
   }
 
   if (playerIds.length > 0) {
-    const { data: players, error: playersError } = await supabase
-      .from("players")
-      .select("id")
+    const { data: members, error: playersError } = await supabase
+      .from("club_players")
+      .select("player_id")
+      .eq("club_id", resolved.clubId)
       .eq("active", true)
-      .in("id", playerIds);
+      .in("player_id", playerIds);
 
     if (playersError) {
       return new Response(JSON.stringify({ ok: false, error: "players_lookup_failed" }), {
@@ -181,7 +150,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const foundIds = new Set((players ?? []).map((player) => player.id));
+    const foundIds = new Set((members ?? []).map((row) => row.player_id));
     if (foundIds.size !== playerIds.length) {
       return new Response(JSON.stringify({ ok: false, error: "invalid_players" }), {
         status: 400,
@@ -305,4 +274,3 @@ Deno.serve(async (req) => {
     }
   );
 });
-

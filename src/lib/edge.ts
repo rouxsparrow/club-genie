@@ -28,7 +28,7 @@ function buildEdgeHeaders(token: string) {
 }
 
 export type ClubTokenValidationResult =
-  | { ok: true }
+  | { ok: true; clubId: string | null; clubName: string | null }
   | { ok: false; reason: "invalid"; status: 403 }
   | { ok: false; reason: "error"; status: number | null };
 
@@ -40,7 +40,12 @@ export async function validateClubTokenDetailed(token: string): Promise<ClubToke
       headers: buildEdgeHeaders(token)
     });
 
-    if (response.ok) return { ok: true };
+    if (response.ok) {
+      const data = (await response.json().catch(() => null)) as { clubId?: unknown; clubName?: unknown } | null;
+      const clubId = typeof data?.clubId === "string" && data.clubId.trim() ? data.clubId.trim() : null;
+      const clubName = typeof data?.clubName === "string" && data.clubName.trim() ? data.clubName.trim() : null;
+      return { ok: true, clubId, clubName };
+    }
     if (response.status === 403) return { ok: false, reason: "invalid", status: 403 };
     return { ok: false, reason: "error", status: response.status || null };
   } catch {
@@ -75,6 +80,7 @@ export async function rotateClubToken(currentToken: string): Promise<RotateToken
 
 type SessionSummary = {
   id: string;
+  club_id?: string | null;
   session_date: string;
   status: string;
   splitwise_status?: string | null;

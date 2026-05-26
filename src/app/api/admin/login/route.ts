@@ -7,6 +7,7 @@ import {
 } from "../../../../lib/admin-session";
 import { verifyPassword } from "../../../../lib/password-hash";
 import { getSupabaseAdmin } from "../../../../lib/supabase/admin";
+import { resolveAdminLoginErrorCode } from "../../../../lib/admin-login-errors";
 
 type AdminUserRow = {
   id: string;
@@ -30,9 +31,12 @@ export async function POST(request: Request) {
     .eq("username", normalizedUsername)
     .maybeSingle();
   const account = (data ?? null) as AdminUserRow | null;
+  const adminUsersTableMissing = Boolean(error?.message.includes("admin_users"));
 
-  if (error && !error.message.includes("admin_users")) {
-    return NextResponse.json({ ok: false, error: "Failed to read admin account." }, { status: 500 });
+  if (error && !adminUsersTableMissing) {
+    const url = new URL("/admin/login", request.url);
+    url.searchParams.set("error", "server");
+    return NextResponse.redirect(url, { status: 303 });
   }
 
   let sessionValue: string | null = null;
@@ -60,7 +64,15 @@ export async function POST(request: Request) {
 
   if (!sessionValue) {
     const url = new URL("/admin/login", request.url);
-    url.searchParams.set("error", "1");
+    const breakglass = getBreakglassConfig();
+    url.searchParams.set(
+      "error",
+      resolveAdminLoginErrorCode({
+        adminUsersTableMissing,
+        breakglassEnabled: breakglass.enabled,
+        breakglassActive: isBreakglassActive(breakglass)
+      })
+    );
     return NextResponse.redirect(url, { status: 303 });
   }
 

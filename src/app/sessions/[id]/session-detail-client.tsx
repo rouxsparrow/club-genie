@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getClubTokenStorageKey, getSession, validateClubToken } from "../../../lib/edge";
+import { getSession, validateClubTokenDetailed } from "../../../lib/edge";
+import { addClubTokenToStorage, readClubTokensFromStorage, removeClubTokenFromStorage } from "../../../lib/club-token-store";
 
 type GateState = "checking" | "denied" | "allowed";
 
 type StoredTokenResult = {
-  token: string | null;
+  tokens: string[];
   shouldCleanUrl: boolean;
 };
 
@@ -32,21 +33,14 @@ type SessionDetailClientProps = {
 };
 
 function readTokenFromLocation(searchParams: URLSearchParams): StoredTokenResult {
-  const key = getClubTokenStorageKey();
   const tokenFromUrl = searchParams.get("t");
 
   if (tokenFromUrl) {
-    localStorage.setItem(key, tokenFromUrl);
-    return { token: tokenFromUrl, shouldCleanUrl: true };
+    const tokens = addClubTokenToStorage(tokenFromUrl);
+    return { tokens, shouldCleanUrl: true };
   }
 
-  const existingToken = localStorage.getItem(key);
-  return { token: existingToken, shouldCleanUrl: false };
-}
-
-function clearStoredToken() {
-  const key = getClubTokenStorageKey();
-  localStorage.removeItem(key);
+  return { tokens: readClubTokensFromStorage(), shouldCleanUrl: false };
 }
 
 function formatDate(dateValue: string) {
@@ -75,9 +69,9 @@ export default function SessionDetailClient({ sessionId }: SessionDetailClientPr
   useEffect(() => {
     setMounted(true);
     const params = new URLSearchParams(window.location.search);
-    const { token, shouldCleanUrl } = readTokenFromLocation(params);
+    const { tokens, shouldCleanUrl } = readTokenFromLocation(params);
 
-    if (!token || !sessionId) {
+    if (tokens.length === 0 || !sessionId) {
       setGateState("denied");
       router.replace("/access-denied");
       return;
@@ -87,37 +81,36 @@ export default function SessionDetailClient({ sessionId }: SessionDetailClientPr
       router.replace(`/sessions/${sessionId}`);
     }
 
-    validateClubToken(token)
-      .then((valid) => {
-        if (!valid) {
-          clearStoredToken();
+    Promise.all(tokens.map((t) => validateClubTokenDetailed(t).then((v) => ({ token: t, v }))))
+      .then(async (results) => {
+        const invalid = results.filter((r) => !r.v.ok && r.v.reason === "invalid").map((r) => r.token);
+        invalid.forEach((t) => removeClubTokenFromStorage(t));
+        const validTokens = results.filter((r) => r.v.ok).map((r) => r.token);
+        if (validTokens.length === 0) {
           setGateState("denied");
           router.replace("/access-denied");
-          return;
+          return null;
         }
         setGateState("allowed");
-        return fetch("/api/admin-session").catch(() => null);
-      })
-      .then(async (adminResponse) => {
+        const adminResponse = await fetch("/api/admin-session").catch(() => null);
         if (adminResponse?.ok) {
           const adminData = (await adminResponse.json()) as { ok: boolean };
           setIsAdmin(Boolean(adminData.ok));
         } else {
           setIsAdmin(false);
         }
-        return getSession(token, sessionId);
-      })
-      .then((response) => {
-        if (!response || !response.ok) {
+        const sessionResults = await Promise.all(validTokens.map((t) => getSession(t, sessionId).then((res) => ({ token: t, res }))));
+        const found = sessionResults.find((r) => r.res?.ok) ?? null;
+        if (!found || !found.res?.ok) {
           setLoading(false);
-          return;
+          return null;
         }
-        setSession(response.session ?? null);
-        setCourts(response.courts ?? []);
+        setSession(found.res.session ?? null);
+        setCourts(found.res.courts ?? []);
         setLoading(false);
+        return null;
       })
       .catch(() => {
-        clearStoredToken();
         setGateState("denied");
         router.replace("/access-denied");
       });

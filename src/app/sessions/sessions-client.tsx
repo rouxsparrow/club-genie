@@ -19,6 +19,7 @@ import {
   validateClubTokenDetailed,
   withdrawSession
 } from "../../lib/edge";
+import { addClubTokenToStorage, readClubTokensFromStorage, removeClubTokenFromStorage } from "../../lib/club-token-store";
 import { formatCourtLabelForDisplay, formatCourtTimeRangeForDisplay } from "../../lib/session-court-display";
 import { formatSessionLocationForDisplay } from "../../lib/session-location";
 import {
@@ -39,9 +40,10 @@ import {
 } from "../../lib/sessions-v2-view";
 
 type GateState = "checking" | "denied" | "allowed" | "error";
-type StoredTokenResult = { token: string | null; shouldCleanUrl: boolean };
+type StoredTokenResult = { tokens: string[]; shouldCleanUrl: boolean };
 type SessionSummary = {
   id: string;
+  club_id?: string | null;
   session_date: string;
   status: string;
   splitwise_status?: string | null;
@@ -73,7 +75,7 @@ type SessionFormState = {
   courts: { id: string; court_label: string; start_time: string; end_time: string }[];
   isSubmitting: boolean;
 };
-type SessionsCardModel = V2Session & { sourceStatus: string };
+type SessionsCardModel = V2Session & { sourceStatus: string; clubId: string | null; clubName: string | null };
 const QUARTER_MINUTES = ["00", "15", "30", "45"] as const;
 const USE_DEFAULT_PAYER_VALUE = "__USE_DEFAULT_PAYER__";
 
@@ -147,17 +149,12 @@ function QuarterTimeSelect({ value, onChange }: QuarterTimeSelectProps) {
 }
 
 function readTokenFromLocation(searchParams: URLSearchParams): StoredTokenResult {
-  const key = getClubTokenStorageKey();
   const tokenFromUrl = searchParams.get("t");
   if (tokenFromUrl) {
-    localStorage.setItem(key, tokenFromUrl);
-    return { token: tokenFromUrl, shouldCleanUrl: true };
+    const tokens = addClubTokenToStorage(tokenFromUrl);
+    return { tokens, shouldCleanUrl: true };
   }
-  return { token: localStorage.getItem(key), shouldCleanUrl: false };
-}
-
-function clearStoredToken() {
-  localStorage.removeItem(getClubTokenStorageKey());
+  return { tokens: readClubTokensFromStorage(), shouldCleanUrl: false };
 }
 
 function formatTimeForCard(value: string | null) {
@@ -209,7 +206,9 @@ export default function SessionsClient() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [courts, setCourts] = useState<CourtDetail[]>([]);
   const [participants, setParticipants] = useState<ParticipantDetail[]>([]);
-  const [players, setPlayers] = useState<Player[]>([]);
+  const [playersByClubId, setPlayersByClubId] = useState<Record<string, Player[]>>({});
+  const [tokenByClubId, setTokenByClubId] = useState<Record<string, string>>({});
+  const [clubNameByClubId, setClubNameByClubId] = useState<Record<string, string>>({});
   const [adminPlayers, setAdminPlayers] = useState<AdminPlayer[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<SessionsV2Filter>("upcoming");
@@ -258,10 +257,8 @@ export default function SessionsClient() {
   const payerOptions = useMemo<AdminPlayer[]>(() => {
     const adminActive = adminPlayers.filter((player) => player.active);
     if (adminActive.length > 0) return adminActive;
-    return players
-      .filter((player) => player.active)
-      .map((player) => ({ id: player.id, name: player.name, active: player.active, is_default_payer: false }));
-  }, [adminPlayers, players]);
+    return [];
+  }, [adminPlayers]);
 
   const sessionSummaryById = useMemo(() => {
     const map = new Map<string, SessionSummary>();
@@ -280,6 +277,11 @@ export default function SessionsClient() {
       const playerCount = sessionParticipants.filter((entry) => Boolean(entry.player?.id)).length;
       return {
         id: session.id,
+        clubId: typeof session.club_id === "string" ? session.club_id : null,
+        clubName:
+          typeof session.club_id === "string" && clubNameByClubId[session.club_id]
+            ? clubNameByClubId[session.club_id]
+            : null,
         date: validDate,
         startTime: formatTimeForCard(session.start_time),
         endTime: formatTimeForCard(session.end_time),
@@ -303,7 +305,7 @@ export default function SessionsClient() {
       } satisfies SessionsCardModel;
     });
     return sortByDateAsc(mapped);
-  }, [sessions, courtsBySession, participantsBySession]);
+  }, [sessions, courtsBySession, participantsBySession, clubNameByClubId]);
 
   const sessionCardsById = useMemo(() => {
     const map = new Map<string, SessionsCardModel>();
@@ -327,6 +329,21 @@ export default function SessionsClient() {
       return true;
     }
     return false;
+  };
+
+  const refreshClubSessions = async (clubId: string) => {
+    const token = tokenByClubId[clubId];
+    if (!token) return false;
+    const sessionsResponse = await listSessions(token);
+    if (!sessionsResponse.ok) return false;
+
+    const nextSessions = (sessionsResponse.sessions ?? []).map((session) => ({ ...session, guest_count: normalizeGuestCount(session.guest_count) }));
+    const nextSessionIds = new Set(nextSessions.map((s) => s.id));
+
+    setSessions((prev) => [...prev.filter((s) => s.club_id !== clubId), ...nextSessions]);
+    setCourts((prev) => [...prev.filter((c) => !nextSessionIds.has(c.session_id)), ...(sessionsResponse.courts ?? [])]);
+    setParticipants((prev) => [...prev.filter((p) => !nextSessionIds.has(p.session_id)), ...(sessionsResponse.participants ?? [])]);
+    return true;
   };
 
   useEffect(() => {
@@ -389,28 +406,37 @@ export default function SessionsClient() {
 
     const bootstrap = async () => {
       const params = new URLSearchParams(window.location.search);
-      const { token, shouldCleanUrl } = readTokenFromLocation(params);
-      if (!token) {
+      const { tokens, shouldCleanUrl } = readTokenFromLocation(params);
+      if (tokens.length === 0) {
         setGateState("denied");
         router.replace("/access-denied");
         return;
       }
       if (shouldCleanUrl) router.replace("/sessions");
 
-      const validation = await validateClubTokenDetailed(token);
+      const validations = await Promise.all(tokens.map((t) => validateClubTokenDetailed(t).then((v) => ({ token: t, v }))));
       if (cancelled) return;
-      if (!validation.ok) {
-        if (validation.reason === "invalid") {
-          clearStoredToken();
-          setGateState("denied");
-          router.replace("/access-denied");
-          return;
-        }
-        setGateState("error");
-        setGateErrorMessage("We could not verify your access right now. Check your connection and try again.");
-        setLoading(false);
+      const validEntries = validations
+        .filter((row): row is { token: string; v: { ok: true; clubId: string | null; clubName: string | null } } => row.v.ok === true)
+        .map((row) => ({ token: row.token, clubId: row.v.clubId, clubName: row.v.clubName }))
+        .filter((row): row is { token: string; clubId: string; clubName: string | null } => Boolean(row.clubId));
+      const invalidTokens = validations.filter((row) => !row.v.ok && row.v.reason === "invalid").map((row) => row.token);
+      invalidTokens.forEach((t) => removeClubTokenFromStorage(t));
+
+      if (validEntries.length === 0) {
+        setGateState("denied");
+        router.replace("/access-denied");
         return;
       }
+
+      const nextTokenByClubId: Record<string, string> = {};
+      const nextClubNameByClubId: Record<string, string> = {};
+      validEntries.forEach((entry) => {
+        nextTokenByClubId[entry.clubId] = entry.token;
+        if (entry.clubName) nextClubNameByClubId[entry.clubId] = entry.clubName;
+      });
+      setTokenByClubId(nextTokenByClubId);
+      setClubNameByClubId(nextClubNameByClubId);
 
       setGateErrorMessage(null);
       setGateState("allowed");
@@ -426,41 +452,33 @@ export default function SessionsClient() {
         setIsAdmin(false);
       }
 
-      const [sessionsResponse, playersResponse, adminPlayersResponse] = await Promise.all([
-        listSessions(token),
-        listPlayers(token),
-        isAdminUser ? fetch("/api/admin/players", { credentials: "include" }).then((response) => response.json()).catch(() => null) : Promise.resolve(null)
+      const [sessionsResults, playersResults] = await Promise.all([
+        Promise.all(validEntries.map((entry) => listSessions(entry.token))),
+        Promise.all(validEntries.map((entry) => listPlayers(entry.token).then((res) => ({ clubId: entry.clubId, res })))),
       ]);
       if (cancelled) return;
 
-      if (sessionsResponse?.ok) {
-        setSessions((sessionsResponse.sessions ?? []).map((session) => ({ ...session, guest_count: normalizeGuestCount(session.guest_count) })));
-        setCourts(sessionsResponse.courts ?? []);
-        setParticipants(sessionsResponse.participants ?? []);
-      }
-      if (playersResponse?.ok) setPlayers(playersResponse.players ?? []);
+      const mergedSessions: SessionSummary[] = [];
+      const mergedCourts: CourtDetail[] = [];
+      const mergedParticipants: ParticipantDetail[] = [];
+      sessionsResults.forEach((sessionsResponse) => {
+        if (!sessionsResponse?.ok) return;
+        mergedSessions.push(...((sessionsResponse.sessions ?? []).map((session) => ({ ...session, guest_count: normalizeGuestCount(session.guest_count) }))));
+        mergedCourts.push(...(sessionsResponse.courts ?? []));
+        mergedParticipants.push(...(sessionsResponse.participants ?? []));
+      });
+      setSessions(mergedSessions);
+      setCourts(mergedCourts);
+      setParticipants(mergedParticipants);
 
-      if (isAdminUser) {
-        const payload = adminPlayersResponse as
-          | { ok?: boolean; players?: Array<{ id?: string; name?: string; active?: boolean; is_default_payer?: boolean }> }
-          | null;
-        if (payload?.ok && Array.isArray(payload.players)) {
-          setAdminPlayers(
-            payload.players
-              .filter((player) => typeof player?.id === "string" && typeof player?.name === "string")
-              .map((player) => ({
-                id: player.id as string,
-                name: player.name as string,
-                active: Boolean(player.active),
-                is_default_payer: Boolean(player.is_default_payer)
-              }))
-          );
-        } else {
-          setAdminPlayers([]);
-        }
-      } else {
-        setAdminPlayers([]);
-      }
+      const nextPlayersByClubId: Record<string, Player[]> = {};
+      playersResults.forEach(({ clubId, res }) => {
+        if (!res?.ok) return;
+        nextPlayersByClubId[clubId] = res.players ?? [];
+      });
+      setPlayersByClubId(nextPlayersByClubId);
+
+      setAdminPlayers([]);
       setLoading(false);
     };
 
@@ -476,7 +494,7 @@ export default function SessionsClient() {
     };
   }, [router]);
 
-  const openJoinDialog = (sessionId: string) => {
+  const openJoinDialog = async (sessionId: string) => {
     setActionMessage(null);
     setJoinDialogError(null);
     const joinedPlayerIds = (participantsBySession[sessionId] ?? [])
@@ -494,6 +512,17 @@ export default function SessionsClient() {
       joinedPlayerIds,
       isSubmitting: false
     });
+
+    const clubId = typeof session?.club_id === "string" ? session.club_id : null;
+    if (clubId && !playersByClubId[clubId]) {
+      const token = tokenByClubId[clubId];
+      if (token) {
+        const response = await listPlayers(token);
+        if (response?.ok) {
+          setPlayersByClubId((prev) => ({ ...prev, [clubId]: response.players ?? [] }));
+        }
+      }
+    }
   };
 
   const closeJoinDialog = () => {
@@ -522,9 +551,11 @@ export default function SessionsClient() {
   };
 
   const handleSubmitParticipants = async () => {
-    const token = localStorage.getItem(getClubTokenStorageKey());
     const sessionId = joinState.sessionId;
-    if (!token || !sessionId) return;
+    const session = sessions.find((entry) => entry.id === sessionId) ?? null;
+    const clubId = typeof session?.club_id === "string" ? session.club_id : selectedSession?.clubId;
+    const token = clubId ? tokenByClubId[clubId] : null;
+    if (!token || !sessionId || !clubId) return;
 
     setJoinDialogError(null);
     const submitStartedAt = Date.now();
@@ -572,7 +603,7 @@ export default function SessionsClient() {
       if (!submitError) {
         nextParticipants = buildSelectedParticipantRows(
           sessionId,
-          players.map((player) => ({ id: player.id, name: player.name, avatar_url: player.avatar_url ?? null })),
+          (playersByClubId[clubId] ?? []).map((player) => ({ id: player.id, name: player.name, avatar_url: player.avatar_url ?? null })),
           joinState.selectedPlayerIds
         );
       }
@@ -605,7 +636,7 @@ export default function SessionsClient() {
     setConfettiOrigin({ x: 0.5, y: 0.7 });
     setConfettiTrigger((prev) => prev + 1);
 
-    void refreshSessions(token)
+    void refreshClubSessions(clubId)
       .then((refreshed) => {
         if (!refreshed) {
           setActionMessage((previous) => (previous ? `${previous} Refresh failed.` : "Refresh failed."));
@@ -706,7 +737,19 @@ export default function SessionsClient() {
         end_time: combineDateAndTimeToIso(formState.session_date, court.end_time)
       }))
     };
-    const endpoint = formState.mode === "create" ? "/api/admin/sessions" : `/api/admin/sessions/${formState.sessionId}`;
+    const clubIdForSave =
+      formState.mode === "edit" && formState.sessionId
+        ? (sessionSummaryById.get(formState.sessionId)?.club_id ?? null)
+        : (Object.keys(tokenByClubId)[0] ?? null);
+    if (!clubIdForSave) {
+      setFormMessage("Select a club first (open a club invite link in this browser).");
+      setFormState((prev) => ({ ...prev, isSubmitting: false }));
+      return;
+    }
+    const endpoint =
+      formState.mode === "create"
+        ? `/api/admin/sessions?clubId=${encodeURIComponent(clubIdForSave)}`
+        : `/api/admin/sessions/${formState.sessionId}`;
     const method = formState.mode === "create" ? "POST" : "PATCH";
     const response = await fetch(endpoint, {
       method,
@@ -720,8 +763,7 @@ export default function SessionsClient() {
       setFormState((prev) => ({ ...prev, isSubmitting: false }));
       return;
     }
-    const token = localStorage.getItem(getClubTokenStorageKey());
-    if (token) await refreshSessions(token);
+    await refreshClubSessions(clubIdForSave);
     setFormMessage("Session saved.");
     setFormState((prev) => ({ ...prev, isSubmitting: false, open: false }));
   };
@@ -883,7 +925,11 @@ export default function SessionsClient() {
         isOpen={joinState.open}
         onClose={closeJoinDialog}
         session={selectedSession}
-        allPlayers={players.map((player) => ({ id: player.id, name: player.name, avatarUrl: player.avatar_url ?? null }))}
+        allPlayers={
+          selectedSession?.clubId
+            ? (playersByClubId[selectedSession.clubId] ?? []).map((player) => ({ id: player.id, name: player.name, avatarUrl: player.avatar_url ?? null }))
+            : []
+        }
         selectedPlayerIds={joinState.selectedPlayerIds}
         onTogglePlayer={togglePlayer}
         onSubmit={handleSubmitParticipants}
@@ -983,11 +1029,6 @@ export default function SessionsClient() {
                   ))}
                 </select>
                 <span className="v2-admin-help">Default payer is applied and saved explicitly.</span>
-                {adminPlayers.length === 0 && players.length > 0 ? (
-                  <span className="v2-admin-help v2-admin-help-warning">
-                    Loaded active-player fallback list (admin roster details unavailable).
-                  </span>
-                ) : null}
               </label>
             </div>
 

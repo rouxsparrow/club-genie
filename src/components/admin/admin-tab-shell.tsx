@@ -3,10 +3,9 @@
 import type { ComponentType, Dispatch, SetStateAction } from "react";
 import AccountsTab from "./accounts-tab";
 import AutomationTab from "./automation-tab";
-import ClubAccessTab from "./club-access-tab";
+import ClubsTab from "./clubs-tab";
 import EmailsTab from "./emails-tab";
 import PlayersTab from "./players-tab";
-import SplitwiseTab from "./splitwise-tab";
 import type { EmailPreviewMessage, TabKey } from "./types";
 
 type AdminTabDefinition = {
@@ -23,11 +22,10 @@ type AdminTabShellOptions = {
 
 const ADMIN_TABS: AdminTabDefinition[] = [
   { key: "accounts", label: "Accounts", eager: false, component: AccountsTab },
+  { key: "clubs", label: "Clubs", eager: true, component: ClubsTab },
   { key: "players", label: "Players", eager: true, component: PlayersTab },
-  { key: "club", label: "Club Access", eager: true, component: ClubAccessTab },
   { key: "automation", label: "Automation", eager: true, component: AutomationTab },
   { key: "emails", label: "Email Preview", eager: false, component: EmailsTab },
-  { key: "splitwise", label: "Splitwise", eager: true, component: SplitwiseTab },
 ];
 
 export const ADMIN_EAGER_TABS: TabKey[] = ADMIN_TABS.filter((tab) => tab.eager).map((tab) => tab.key);

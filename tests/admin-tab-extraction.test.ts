@@ -19,7 +19,7 @@ describe('phase 02 tab extraction source files', () => {
     expect(accountsSource).toContain('Create Account');
     expect(accountsSource).toContain('Password changed.');
 
-    expect(playersSource).toContain('Manage club roster with compact cards');
+    expect(playersSource).toContain('Manage global player directory.');
     expect(playersSource).toContain('Add to Roster');
     expect(playersSource).toContain('Hide Advanced');
     expect(playersSource).toContain('Upload Avatar');
@@ -75,15 +75,14 @@ describe('phase 03 shell reduction source contract', () => {
   it('keeps local activeTab, eager tabs, and visited-tab state in the admin page shell', () => {
     const pageSource = readFileSync(pagePath, 'utf8');
 
-    expect(pageSource).toContain("useState<TabKey>(\"players\")");
-    expect(pageSource).toContain('const eagerMountedTabs: TabKey[] = ["players", "club", "automation", "splitwise"]');
+    expect(pageSource).toContain("useState<TabKey>(\"clubs\")");
+    expect(pageSource).toContain('const eagerMountedTabs: TabKey[] = ["clubs", "players", "automation"]');
     expect(pageSource).toContain('useState<Record<TabKey, boolean>>({');
     expect(pageSource).toContain('accounts: false');
+    expect(pageSource).toContain('clubs: true');
     expect(pageSource).toContain('players: true');
-    expect(pageSource).toContain('club: false');
     expect(pageSource).toContain('automation: false');
     expect(pageSource).toContain('emails: false');
-    expect(pageSource).toContain('splitwise: true');
   });
 
   it('does not introduce query-param or router-based tab state', () => {

@@ -7,40 +7,46 @@ type CourtInput = {
   end_time?: string | null;
 };
 
-async function resolveDefaultPayerId(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>) {
+async function resolveDefaultPayerId(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>, clubId: string) {
   const { data, error } = await supabaseAdmin
-    .from("players")
-    .select("id")
+    .from("club_players")
+    .select("player_id")
+    .eq("club_id", clubId)
     .eq("is_default_payer", true)
     .limit(1)
     .maybeSingle();
-
-  if (error) {
-    const message = error.message ?? "";
-    if (message.includes("is_default_payer")) {
-      throw new Error("missing_splitwise_player_columns");
-    }
-    throw new Error("default_payer_lookup_failed");
-  }
-
-  const payerId = typeof data?.id === "string" && data.id.trim() ? data.id : null;
-  if (!payerId) {
-    throw new Error("missing_default_payer");
-  }
+  if (error) throw new Error("default_payer_lookup_failed");
+  const payerId = typeof data?.player_id === "string" && data.player_id.trim() ? data.player_id : null;
+  if (!payerId) throw new Error("missing_default_payer");
   return payerId;
 }
 
-async function ensurePlayerExists(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>, playerId: string) {
-  const { data, error } = await supabaseAdmin.from("players").select("id").eq("id", playerId).maybeSingle();
-  if (error) {
-    throw new Error("payer_lookup_failed");
-  }
-  return Boolean(data?.id);
+async function ensurePlayerExists(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>, clubId: string, playerId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("club_players")
+    .select("player_id")
+    .eq("club_id", clubId)
+    .eq("player_id", playerId)
+    .maybeSingle();
+  if (error) throw new Error("payer_lookup_failed");
+  return Boolean(data?.player_id);
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const supabaseAdmin = getSupabaseAdmin();
+  const { data: sessionMeta, error: sessionMetaError } = await supabaseAdmin
+    .from("sessions")
+    .select("club_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (sessionMetaError) {
+    return NextResponse.json({ ok: false, error: sessionMetaError.message }, { status: 500 });
+  }
+  const clubId = typeof sessionMeta?.club_id === "string" && sessionMeta.club_id.trim() ? sessionMeta.club_id.trim() : null;
+  if (!clubId) {
+    return NextResponse.json({ ok: false, error: "session_missing_club_id" }, { status: 500 });
+  }
   const payload = (await request.json()) as {
     session_date?: string;
     status?: string;
@@ -58,9 +64,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     try {
       const incoming = typeof payload.payerPlayerId === "string" ? payload.payerPlayerId.trim() : payload.payerPlayerId;
       if (!incoming) {
-        resolvedPayerUpdate = await resolveDefaultPayerId(supabaseAdmin);
+        resolvedPayerUpdate = await resolveDefaultPayerId(supabaseAdmin, clubId);
       } else if (typeof incoming === "string") {
-        const exists = await ensurePlayerExists(supabaseAdmin, incoming);
+        const exists = await ensurePlayerExists(supabaseAdmin, clubId, incoming);
         if (!exists) {
           return NextResponse.json({ ok: false, error: "Selected payer does not exist." }, { status: 400 });
         }
@@ -164,7 +170,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   // "Clean slate": remove receipts for this session date so ingestion can re-run.
   const { data: sessionRow, error: sessionLookupError } = await supabaseAdmin
     .from("sessions")
-    .select("id,session_date")
+    .select("id,session_date,club_id")
     .eq("id", sessionId)
     .maybeSingle();
   if (sessionLookupError) {
@@ -177,6 +183,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   const { error: receiptsDeleteError } = await supabaseAdmin
     .from("email_receipts")
     .delete()
+    .eq("club_id", sessionRow.club_id)
     .eq("parsed_session_date", sessionRow.session_date);
   if (receiptsDeleteError) {
     return NextResponse.json({ ok: false, error: receiptsDeleteError.message }, { status: 500 });

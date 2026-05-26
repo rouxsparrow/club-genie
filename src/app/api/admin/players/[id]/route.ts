@@ -8,35 +8,37 @@ function normalizePlayerRow(row: unknown) {
   return {
     ...record,
     splitwise_user_id: typeof record.splitwise_user_id === "number" ? record.splitwise_user_id : null,
-    is_default_payer: typeof record.is_default_payer === "boolean" ? record.is_default_payer : false,
-    shuttlecock_paid: typeof record.shuttlecock_paid === "boolean" ? record.shuttlecock_paid : false,
     avatar_path: avatarPath,
-    avatar_url: avatarPathToPublicUrl(process.env.SUPABASE_URL, avatarPath)
+    avatar_url: avatarPathToPublicUrl(process.env.SUPABASE_URL, avatarPath),
   };
 }
 
 async function fetchPlayerById(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>, id: string) {
   const selectCandidates = [
-    "id,name,active,splitwise_user_id,is_default_payer,shuttlecock_paid,avatar_path",
-    "id,name,active,splitwise_user_id,is_default_payer,shuttlecock_paid",
-    "id,name,active,splitwise_user_id,is_default_payer,avatar_path",
-    "id,name,active,splitwise_user_id,is_default_payer",
+    "id,name,active,splitwise_user_id,avatar_path",
+    "id,name,active,splitwise_user_id",
     "id,name,active,avatar_path",
     "id,name,active"
   ] as const;
 
-  let query = await supabaseAdmin.from("players").select(selectCandidates[0] as string).eq("id", id).maybeSingle();
+  let query = await supabaseAdmin
+    .from("players")
+    .select(selectCandidates[0] as string)
+    .eq("id", id)
+    .maybeSingle();
   for (let i = 1; i < selectCandidates.length && query.error; i += 1) {
     const message = query.error.message ?? "";
     if (
       !message.includes("splitwise_user_id") &&
-      !message.includes("is_default_payer") &&
-      !message.includes("shuttlecock_paid") &&
       !message.includes("avatar_path")
     ) {
       break;
     }
-    query = await supabaseAdmin.from("players").select(selectCandidates[i] as string).eq("id", id).maybeSingle();
+    query = await supabaseAdmin
+      .from("players")
+      .select(selectCandidates[i] as string)
+      .eq("id", id)
+      .maybeSingle();
   }
 
   return query;
@@ -49,8 +51,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     name?: string;
     active?: boolean;
     splitwiseUserId?: unknown;
-    isDefaultPayer?: unknown;
-    shuttlecockPaid?: unknown;
   };
 
   const updates: Record<string, unknown> = {};
@@ -77,53 +77,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
   }
 
-  if (payload.isDefaultPayer !== undefined) {
-    if (typeof payload.isDefaultPayer !== "boolean") {
-      return NextResponse.json({ ok: false, error: "isDefaultPayer must be boolean." }, { status: 400 });
-    }
-
-    // Enforce "at most one default payer" and keep UX simple.
-    if (payload.isDefaultPayer) {
-      const { error: clearError } = await supabaseAdmin.from("players").update({ is_default_payer: false }).eq("is_default_payer", true);
-      if (clearError) {
-        return NextResponse.json({ ok: false, error: clearError.message }, { status: 500 });
-      }
-      updates.is_default_payer = true;
-    } else {
-      updates.is_default_payer = false;
-    }
-  }
-
-  if (payload.shuttlecockPaid !== undefined) {
-    if (typeof payload.shuttlecockPaid !== "boolean") {
-      return NextResponse.json({ ok: false, error: "shuttlecockPaid must be boolean." }, { status: 400 });
-    }
-    updates.shuttlecock_paid = payload.shuttlecockPaid;
-  }
-
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ ok: false, error: "No updates provided." }, { status: 400 });
   }
 
-  const { error } = await supabaseAdmin
-    .from("players")
-    .update(updates)
-    .eq("id", id)
-    .select("id")
-    .maybeSingle();
-
+  const { error } = await supabaseAdmin.from("players").update(updates).eq("id", id).select("id").maybeSingle();
   if (error) {
+    const code = (error as unknown as { code?: string }).code ?? "";
     const message = error.message ?? "";
-    if (
-      message.includes("splitwise_user_id") ||
-      message.includes("is_default_payer") ||
-      message.includes("shuttlecock_paid") ||
-      message.includes("avatar_path")
-    ) {
-      return NextResponse.json(
-        { ok: false, error: "Player columns missing; apply migrations 20260215230000, 20260216170000, 20260327090000." },
-        { status: 500 }
-      );
+    if (code === "23505" || message.toLowerCase().includes("duplicate") || message.toLowerCase().includes("unique")) {
+      return NextResponse.json({ ok: false, error: "Player name already exists." }, { status: 400 });
     }
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }

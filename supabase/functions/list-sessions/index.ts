@@ -1,32 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { resolveClubFromToken } from "../_shared/club-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, apikey, x-club-token, content-type"
 };
 
-const encoder = new TextEncoder();
-
-function toHex(buffer: ArrayBuffer) {
-  return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function timingSafeEqual(a: string, b: string) {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}
-
-async function hashToken(token: string) {
-  const data = encoder.encode(token);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return toHex(digest);
-}
 
 async function getSupabaseClient() {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -52,20 +31,8 @@ function avatarPathToPublicUrl(supabaseUrl: string | undefined, avatarPath: stri
 }
 
 async function validateClubToken(supabase: ReturnType<typeof createClient>, token: string) {
-  const { data, error } = await supabase
-    .from("club_settings")
-    .select("token_hash")
-    .order("token_version", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data?.token_hash) {
-    return false;
-  }
-
-  const incomingHash = await hashToken(token);
-  return timingSafeEqual(incomingHash, data.token_hash);
+  const resolved = await resolveClubFromToken(supabase, token);
+  return resolved.ok ? resolved : null;
 }
 
 Deno.serve(async (req) => {
@@ -89,8 +56,8 @@ Deno.serve(async (req) => {
     });
   }
 
-  const valid = await validateClubToken(supabase, token);
-  if (!valid) {
+  const resolved = await validateClubToken(supabase, token);
+  if (!resolved) {
     return new Response(JSON.stringify({ ok: false }), {
       status: 403,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -98,57 +65,67 @@ Deno.serve(async (req) => {
   }
 
   const selectCandidates = [
-    "id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee, location, remarks",
-    "id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee, remarks",
-    "id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee, location",
-    "id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee",
-    "id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee, location, remarks",
-    "id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee, remarks",
-    "id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee, location",
-    "id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee",
-    "id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee, location, remarks",
-    "id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee, remarks",
-    "id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee, location",
-    "id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee",
-    "id, session_date, status, guest_count, start_time, end_time, total_fee, location, remarks",
-    "id, session_date, status, guest_count, start_time, end_time, total_fee, remarks",
-    "id, session_date, status, guest_count, start_time, end_time, total_fee, location",
-    "id, session_date, status, guest_count, start_time, end_time, total_fee",
-    "id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, location, remarks",
-    "id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, remarks",
-    "id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, location",
-    "id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee",
-    "id, session_date, status, splitwise_status, start_time, end_time, total_fee, location, remarks",
-    "id, session_date, status, splitwise_status, start_time, end_time, total_fee, remarks",
-    "id, session_date, status, splitwise_status, start_time, end_time, total_fee, location",
-    "id, session_date, status, splitwise_status, start_time, end_time, total_fee",
-    "id, session_date, status, payer_player_id, start_time, end_time, total_fee, location, remarks",
-    "id, session_date, status, payer_player_id, start_time, end_time, total_fee, remarks",
-    "id, session_date, status, payer_player_id, start_time, end_time, total_fee, location",
-    "id, session_date, status, payer_player_id, start_time, end_time, total_fee",
-    "id, session_date, status, start_time, end_time, total_fee, location, remarks",
-    "id, session_date, status, start_time, end_time, total_fee, remarks",
-    "id, session_date, status, start_time, end_time, total_fee, location",
-    "id, session_date, status, start_time, end_time, total_fee"
+    "id, club_id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee, location, remarks",
+    "id, club_id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee, remarks",
+    "id, club_id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee, location",
+    "id, club_id, session_date, status, splitwise_status, payer_player_id, guest_count, start_time, end_time, total_fee",
+    "id, club_id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee, location, remarks",
+    "id, club_id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee, remarks",
+    "id, club_id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee, location",
+    "id, club_id, session_date, status, splitwise_status, guest_count, start_time, end_time, total_fee",
+    "id, club_id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee, location, remarks",
+    "id, club_id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee, remarks",
+    "id, club_id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee, location",
+    "id, club_id, session_date, status, payer_player_id, guest_count, start_time, end_time, total_fee",
+    "id, club_id, session_date, status, guest_count, start_time, end_time, total_fee, location, remarks",
+    "id, club_id, session_date, status, guest_count, start_time, end_time, total_fee, remarks",
+    "id, club_id, session_date, status, guest_count, start_time, end_time, total_fee, location",
+    "id, club_id, session_date, status, guest_count, start_time, end_time, total_fee",
+    "id, club_id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, location, remarks",
+    "id, club_id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, remarks",
+    "id, club_id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee, location",
+    "id, club_id, session_date, status, splitwise_status, payer_player_id, start_time, end_time, total_fee",
+    "id, club_id, session_date, status, splitwise_status, start_time, end_time, total_fee, location, remarks",
+    "id, club_id, session_date, status, splitwise_status, start_time, end_time, total_fee, remarks",
+    "id, club_id, session_date, status, splitwise_status, start_time, end_time, total_fee, location",
+    "id, club_id, session_date, status, splitwise_status, start_time, end_time, total_fee",
+    "id, club_id, session_date, status, payer_player_id, start_time, end_time, total_fee, location, remarks",
+    "id, club_id, session_date, status, payer_player_id, start_time, end_time, total_fee, remarks",
+    "id, club_id, session_date, status, payer_player_id, start_time, end_time, total_fee, location",
+    "id, club_id, session_date, status, payer_player_id, start_time, end_time, total_fee",
+    "id, club_id, session_date, status, start_time, end_time, total_fee, location, remarks",
+    "id, club_id, session_date, status, start_time, end_time, total_fee, remarks",
+    "id, club_id, session_date, status, start_time, end_time, total_fee, location",
+    "id, club_id, session_date, status, start_time, end_time, total_fee"
   ] as const;
 
-  let sessionsQuery = await supabase.from("sessions").select(selectCandidates[0]).order("session_date", { ascending: true });
+  let sessionsQuery = await supabase
+    .from("sessions")
+    .select(selectCandidates[0])
+    .eq("club_id", resolved.clubId)
+    .order("session_date", { ascending: true });
   for (let i = 1; i < selectCandidates.length && sessionsQuery.error; i += 1) {
     const message = sessionsQuery.error.message ?? "";
     if (
       !message.includes("location") &&
       !message.includes("remarks") &&
+      !message.includes("club_id") &&
       !message.includes("splitwise_status") &&
       !message.includes("payer_player_id") &&
       !message.includes("guest_count")
     ) {
       break;
     }
-    sessionsQuery = await supabase.from("sessions").select(selectCandidates[i]).order("session_date", { ascending: true });
+    sessionsQuery = await supabase
+      .from("sessions")
+      .select(selectCandidates[i])
+      .eq("club_id", resolved.clubId)
+      .order("session_date", { ascending: true });
   }
 
   const sessions = (sessionsQuery.data ?? []).map((session) => ({
     ...session,
+    club_id: "club_id" in session ? session.club_id : resolved.clubId,
     location: "location" in session ? session.location : null,
     remarks: "remarks" in session ? session.remarks : null,
     splitwise_status: "splitwise_status" in session ? session.splitwise_status : null,

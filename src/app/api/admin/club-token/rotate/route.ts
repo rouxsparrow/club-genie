@@ -1,6 +1,5 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { isMissingTokenValueColumnError, warningMessageForCode } from "../../../../../lib/club-token-compat";
 import { sha256Hex } from "../../../../../lib/crypto";
 import { getSupabaseAdmin } from "../../../../../lib/supabase/admin";
 
@@ -13,7 +12,11 @@ function getHost(value: string | undefined) {
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const clubId = new URL(request.url).searchParams.get("clubId")?.trim() ?? "";
+  if (!clubId) {
+    return NextResponse.json({ ok: false, error: "clubId is required." }, { status: 400 });
+  }
   const serverHost = getHost(process.env.SUPABASE_URL);
   const publicHost = getHost(process.env.NEXT_PUBLIC_SUPABASE_URL);
 
@@ -31,8 +34,10 @@ export async function POST() {
   const token = crypto.randomBytes(24).toString("hex");
   const tokenHash = sha256Hex(token);
   const { data: latest, error: latestError } = await supabaseAdmin
-    .from("club_settings")
+    .from("club_tokens")
     .select("token_version")
+    .eq("club_id", clubId)
+    .eq("is_current", true)
     .order("token_version", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
@@ -44,29 +49,16 @@ export async function POST() {
 
   const nextVersion = (latest?.token_version ?? 0) + 1;
 
-  const { error } = await supabaseAdmin.from("club_settings").insert({
+  await supabaseAdmin.from("club_tokens").update({ is_current: false }).eq("club_id", clubId).eq("is_current", true);
+
+  const { error } = await supabaseAdmin.from("club_tokens").insert({
+    club_id: clubId,
     token_hash: tokenHash,
-    token_value: token,
     token_version: nextVersion,
+    token_value: token,
+    is_current: true,
     rotated_at: new Date().toISOString()
   });
-
-  if (isMissingTokenValueColumnError(error)) {
-    const { error: fallbackError } = await supabaseAdmin.from("club_settings").insert({
-      token_hash: tokenHash,
-      token_version: nextVersion,
-      rotated_at: new Date().toISOString()
-    });
-    if (fallbackError) {
-      return NextResponse.json({ ok: false, error: fallbackError.message }, { status: 500 });
-    }
-    return NextResponse.json({
-      ok: true,
-      token,
-      warningCode: "token_value_not_persisted",
-      warningMessage: warningMessageForCode("token_value_not_persisted")
-    });
-  }
 
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });

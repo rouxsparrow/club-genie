@@ -7,38 +7,37 @@ type CourtInput = {
   end_time?: string | null;
 };
 
-async function resolveDefaultPayerId(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>) {
+async function resolveDefaultPayerId(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>, clubId: string) {
   const { data, error } = await supabaseAdmin
-    .from("players")
-    .select("id")
+    .from("club_players")
+    .select("player_id")
+    .eq("club_id", clubId)
     .eq("is_default_payer", true)
     .limit(1)
     .maybeSingle();
 
-  if (error) {
-    const message = error.message ?? "";
-    if (message.includes("is_default_payer")) {
-      throw new Error("missing_splitwise_player_columns");
-    }
-    throw new Error("default_payer_lookup_failed");
-  }
-
-  const payerId = typeof data?.id === "string" && data.id.trim() ? data.id : null;
-  if (!payerId) {
-    throw new Error("missing_default_payer");
-  }
+  if (error) throw new Error("default_payer_lookup_failed");
+  const payerId = typeof data?.player_id === "string" && data.player_id.trim() ? data.player_id : null;
+  if (!payerId) throw new Error("missing_default_payer");
   return payerId;
 }
 
-async function ensurePlayerExists(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>, playerId: string) {
-  const { data, error } = await supabaseAdmin.from("players").select("id").eq("id", playerId).maybeSingle();
-  if (error) {
-    throw new Error("payer_lookup_failed");
-  }
-  return Boolean(data?.id);
+async function ensurePlayerExists(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>, clubId: string, playerId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("club_players")
+    .select("player_id")
+    .eq("club_id", clubId)
+    .eq("player_id", playerId)
+    .maybeSingle();
+  if (error) throw new Error("payer_lookup_failed");
+  return Boolean(data?.player_id);
 }
 
 export async function POST(request: Request) {
+  const clubId = new URL(request.url).searchParams.get("clubId")?.trim() ?? "";
+  if (!clubId) {
+    return NextResponse.json({ ok: false, error: "clubId is required." }, { status: 400 });
+  }
   const supabaseAdmin = getSupabaseAdmin();
   const payload = (await request.json()) as {
     session_date?: string;
@@ -60,9 +59,9 @@ export async function POST(request: Request) {
   try {
     const incoming = typeof payload.payerPlayerId === "string" ? payload.payerPlayerId.trim() : payload.payerPlayerId;
     if (!incoming) {
-      payerPlayerId = await resolveDefaultPayerId(supabaseAdmin);
+      payerPlayerId = await resolveDefaultPayerId(supabaseAdmin, clubId);
     } else {
-      const exists = await ensurePlayerExists(supabaseAdmin, incoming);
+      const exists = await ensurePlayerExists(supabaseAdmin, clubId, incoming);
       if (!exists) {
         return NextResponse.json({ ok: false, error: "Selected payer does not exist." }, { status: 400 });
       }
@@ -86,6 +85,7 @@ export async function POST(request: Request) {
   }
 
   const baseInsert = {
+    club_id: clubId,
     session_date: payload.session_date,
     status: payload.status ?? "DRAFT",
     start_time: payload.start_time,

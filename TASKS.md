@@ -155,3 +155,4 @@
 - [x] Update player action dialog to single-submit toggle flow (joined defaults on, in-dialog red errors on failure, no close on failure), set Sessions list action button green, and push missing `location/remarks` migration to remote DB (test rationale: covered by `npm test` + `npm run lint` + `npm run typecheck`; DB schema validated via `supabase db push` applying `20260209120000_add_session_fields.sql`).
 - [x] Light/dark mode toggle with localStorage persistence.
 - [x] Manual test steps documented in README.
+- [x] Multi-club support (clubs + memberships + per-club Splitwise settings + multi-token Sessions aggregation) (tests: `tests/club-token-store.test.ts`; manual browser check required for `/sessions` multi-token aggregation and `/admin` club selector flows).

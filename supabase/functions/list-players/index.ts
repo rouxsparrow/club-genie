@@ -1,32 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { resolveClubFromToken } from "../_shared/club-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, apikey, x-club-token, content-type"
 };
 
-const encoder = new TextEncoder();
-
-function toHex(buffer: ArrayBuffer) {
-  return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function timingSafeEqual(a: string, b: string) {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}
-
-async function hashToken(token: string) {
-  const data = encoder.encode(token);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return toHex(digest);
-}
 
 async function getSupabaseClient() {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -52,20 +31,8 @@ function avatarPathToPublicUrl(supabaseUrl: string | undefined, avatarPath: stri
 }
 
 async function validateClubToken(supabase: ReturnType<typeof createClient>, token: string) {
-  const { data, error } = await supabase
-    .from("club_settings")
-    .select("token_hash")
-    .order("token_version", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data?.token_hash) {
-    return false;
-  }
-
-  const incomingHash = await hashToken(token);
-  return timingSafeEqual(incomingHash, data.token_hash);
+  const resolved = await resolveClubFromToken(supabase, token);
+  return resolved.ok ? resolved : null;
 }
 
 Deno.serve(async (req) => {
@@ -89,8 +56,8 @@ Deno.serve(async (req) => {
     });
   }
 
-  const valid = await validateClubToken(supabase, token);
-  if (!valid) {
+  const resolved = await validateClubToken(supabase, token);
+  if (!resolved) {
     return new Response(JSON.stringify({ ok: false }), {
       status: 403,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -98,15 +65,23 @@ Deno.serve(async (req) => {
   }
 
   const selectCandidates = [
-    "id, name, active, avatar_path",
-    "id, name, active"
+    "active, player:players(id, name, avatar_path)",
+    "active, player:players(id, name)"
   ] as const;
 
-  let query = await supabase.from("players").select(selectCandidates[0]).eq("active", true).order("name", { ascending: true });
+  let query = await supabase
+    .from("club_players")
+    .select(selectCandidates[0])
+    .eq("club_id", resolved.clubId)
+    .eq("active", true);
   for (let i = 1; i < selectCandidates.length && query.error; i += 1) {
     const message = query.error.message ?? "";
     if (!message.includes("avatar_path")) break;
-    query = await supabase.from("players").select(selectCandidates[i]).eq("active", true).order("name", { ascending: true });
+    query = await supabase
+      .from("club_players")
+      .select(selectCandidates[i])
+      .eq("club_id", resolved.clubId)
+      .eq("active", true);
   }
 
   if (query.error) {
@@ -117,16 +92,21 @@ Deno.serve(async (req) => {
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const players = (query.data ?? []).map((player) => ({
-    ...player,
-    avatar_url:
-      "avatar_path" in player
-        ? avatarPathToPublicUrl(
-            supabaseUrl,
-            typeof player.avatar_path === "string" && player.avatar_path.trim() ? player.avatar_path : null
-          )
-        : null
-  }));
+  const players = (query.data ?? [])
+    .map((row) => {
+      const record = row as { player?: { id?: string; name?: string; avatar_path?: string | null } | null } | null;
+      const player = record?.player ?? null;
+      if (!player || typeof player.id !== "string" || typeof player.name !== "string") return null;
+      const avatarPath = typeof player.avatar_path === "string" && player.avatar_path.trim() ? player.avatar_path : null;
+      return {
+        id: player.id,
+        name: player.name,
+        active: true,
+        avatar_url: avatarPathToPublicUrl(supabaseUrl, avatarPath)
+      };
+    })
+    .filter((p): p is { id: string; name: string; active: boolean; avatar_url: string | null } => Boolean(p))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return new Response(JSON.stringify({ ok: true, players: players ?? [] }), {
     status: 200,

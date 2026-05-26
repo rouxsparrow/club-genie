@@ -8,17 +8,16 @@ import AnimatedBackground from "../../components/v2/AnimatedBackground";
 import "../globals-v2.css";
 
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState<TabKey>("players");
+  const [activeTab, setActiveTab] = useState<TabKey>("clubs");
   const [mounted, setMounted] = useState(false);
   const [emailPreviewMessages, setEmailPreviewMessages] = useState<EmailPreviewMessage[]>([]);
-  const eagerMountedTabs: TabKey[] = ["players", "club", "automation", "splitwise"];
+  const eagerMountedTabs: TabKey[] = ["clubs", "players", "automation"];
   const [visitedTabs, setVisitedTabs] = useState<Record<TabKey, boolean>>({
     accounts: false,
+    clubs: true,
     players: true,
-    club: false,
     automation: false,
     emails: false,
-    splitwise: true,
   });
 
   useEffect(() => {

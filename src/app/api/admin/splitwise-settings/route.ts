@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../../lib/supabase/admin";
 
 type SplitwiseSettings = {
-  id: number;
+  club_id: string;
   group_id: number;
   currency_code: string;
   enabled: boolean;
@@ -14,19 +14,23 @@ type SplitwiseSettings = {
   updated_at: string | null;
 };
 
-export async function GET() {
+export async function GET(request: Request) {
+  const clubId = new URL(request.url).searchParams.get("clubId")?.trim() ?? "";
+  if (!clubId) {
+    return NextResponse.json({ ok: false, error: "clubId is required." }, { status: 400 });
+  }
   const supabaseAdmin = getSupabaseAdmin();
   const selectCandidates = [
-    "id,group_id,currency_code,enabled,shuttlecock_fee,court_conversion_fee_percent,description_template,date_format,location_replacements,updated_at",
-    "id,group_id,currency_code,enabled,shuttlecock_fee,description_template,date_format,location_replacements,updated_at",
-    "id,group_id,currency_code,enabled,description_template,date_format,location_replacements,updated_at",
+    "club_id,group_id,currency_code,enabled,shuttlecock_fee,court_conversion_fee_percent,description_template,date_format,location_replacements,updated_at",
+    "club_id,group_id,currency_code,enabled,shuttlecock_fee,description_template,date_format,location_replacements,updated_at",
+    "club_id,group_id,currency_code,enabled,description_template,date_format,location_replacements,updated_at",
   ] as const;
-  let query = await supabaseAdmin.from("splitwise_settings").select(selectCandidates[0]).eq("id", 1).maybeSingle();
+  let query = await supabaseAdmin.from("club_splitwise_settings").select(selectCandidates[0]).eq("club_id", clubId).maybeSingle();
   for (const candidate of selectCandidates.slice(1)) {
     if (!query.error) break;
     const message = query.error.message ?? "";
     if (!message.includes("shuttlecock_fee") && !message.includes("court_conversion_fee_percent")) break;
-    query = await supabaseAdmin.from("splitwise_settings").select(candidate).eq("id", 1).maybeSingle();
+    query = await supabaseAdmin.from("club_splitwise_settings").select(candidate).eq("club_id", clubId).maybeSingle();
   }
   const { data, error } = query;
 
@@ -35,7 +39,7 @@ export async function GET() {
   }
 
   const settings = (data ?? {
-    id: 1,
+    club_id: clubId,
     group_id: 0,
     currency_code: "SGD",
     enabled: true,
@@ -86,6 +90,10 @@ function normalizeLocationReplacements(value: unknown) {
 }
 
 export async function PATCH(request: Request) {
+  const clubId = new URL(request.url).searchParams.get("clubId")?.trim() ?? "";
+  if (!clubId) {
+    return NextResponse.json({ ok: false, error: "clubId is required." }, { status: 400 });
+  }
   const supabaseAdmin = getSupabaseAdmin();
   const payload = (await request.json().catch(() => null)) as {
     groupId?: unknown;
@@ -98,7 +106,7 @@ export async function PATCH(request: Request) {
     locationReplacements?: unknown;
   } | null;
 
-  const updates: Record<string, unknown> = { id: 1, updated_at: new Date().toISOString() };
+  const updates: Record<string, unknown> = { club_id: clubId, updated_at: new Date().toISOString() };
 
   if (payload?.groupId !== undefined) {
     const raw = typeof payload.groupId === "string" ? payload.groupId.trim() : payload.groupId;
@@ -172,30 +180,18 @@ export async function PATCH(request: Request) {
     updates.location_replacements = normalizedReplacements.replacements;
   }
 
-  const keys = Object.keys(updates).filter((k) => k !== "id" && k !== "updated_at");
+  const keys = Object.keys(updates).filter((k) => k !== "club_id" && k !== "updated_at");
   if (keys.length === 0) {
     return NextResponse.json({ ok: false, error: "No updates provided." }, { status: 400 });
   }
 
   const { data, error } = await supabaseAdmin
-    .from("splitwise_settings")
-    .upsert(updates, { onConflict: "id" })
-    .select("id,group_id,currency_code,enabled,shuttlecock_fee,court_conversion_fee_percent,description_template,date_format,location_replacements,updated_at")
+    .from("club_splitwise_settings")
+    .upsert(updates, { onConflict: "club_id" })
+    .select("club_id,group_id,currency_code,enabled,shuttlecock_fee,court_conversion_fee_percent,description_template,date_format,location_replacements,updated_at")
     .single();
 
   if (error) {
-    if ((error.message ?? "").includes("shuttlecock_fee")) {
-      return NextResponse.json(
-        { ok: false, error: "splitwise_settings.shuttlecock_fee missing; apply migration 20260327090000." },
-        { status: 500 }
-      );
-    }
-    if ((error.message ?? "").includes("court_conversion_fee_percent")) {
-      return NextResponse.json(
-        { ok: false, error: "splitwise_settings.court_conversion_fee_percent missing; apply migration 20260410054800." },
-        { status: 500 }
-      );
-    }
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 

@@ -3,6 +3,7 @@
 import { Lock } from "../../components/icons";
 import { useEffect, useState } from "react";
 import { adminFetch } from "./admin-fetch";
+import { useAdminClub } from "./admin-club-context";
 
 type ClubTokenWarningCode = "migration_missing_token_value" | "token_not_recoverable";
 
@@ -17,6 +18,7 @@ type ClubTokenCurrentResponse = {
 };
 
 export default function ClubAccessTab() {
+  const { club } = useAdminClub();
   const [isRotating, setIsRotating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [rotationError, setRotationError] = useState<string | null>(null);
@@ -25,7 +27,13 @@ export default function ClubAccessTab() {
   const [clubMessage, setClubMessage] = useState<string | null>(null);
 
   const refreshCurrentClubToken = async () => {
-    const data = await adminFetch<ClubTokenCurrentResponse>("/api/admin/club-token/current");
+    if (!club?.id) {
+      setClubMessage("Select a club first.");
+      setCurrentToken(null);
+      setCurrentAccessLink(null);
+      return;
+    }
+    const data = await adminFetch<ClubTokenCurrentResponse>(`/api/admin/club-token/current?clubId=${encodeURIComponent(club.id)}`);
     if (!data.ok) {
       setClubMessage(data.error ?? "Failed to load current token from DB.");
       setCurrentToken(null);
@@ -44,9 +52,13 @@ export default function ClubAccessTab() {
 
   useEffect(() => {
     void refreshCurrentClubToken();
-  }, []);
+  }, [club?.id]);
 
   const handleRotateToken = async () => {
+    if (!club?.id) {
+      setRotationError("Select a club first.");
+      return;
+    }
     setIsRotating(true);
     setRotationError(null);
     setClubMessage(null);
@@ -56,7 +68,7 @@ export default function ClubAccessTab() {
       error?: string;
       warningCode?: "token_value_not_persisted";
       warningMessage?: string;
-    }>("/api/admin/club-token/rotate", {
+    }>(`/api/admin/club-token/rotate?clubId=${encodeURIComponent(club.id)}`, {
       method: "POST",
       credentials: "include",
     });

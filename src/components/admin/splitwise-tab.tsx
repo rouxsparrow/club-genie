@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { formatDuration, formatSplitwiseHistorySummary } from "./formatters";
 import type { RunHistoryEntry, RunHistorySourceFilter, RunHistoryStatusFilter } from "./types";
+import { useAdminClub } from "./admin-club-context";
 
 type SplitwiseSettings = {
-  id: number;
+  club_id: string;
   group_id: number;
   currency_code: string;
   enabled: boolean;
@@ -52,6 +53,7 @@ type SplitwiseExpenseRecord = {
 };
 
 export default function SplitwiseTab() {
+  const { club } = useAdminClub();
   const [splitwiseSettings, setSplitwiseSettings] = useState<SplitwiseSettings | null>(null);
   const [splitwiseGroupIdInput, setSplitwiseGroupIdInput] = useState("");
   const [splitwiseCurrencyInput, setSplitwiseCurrencyInput] = useState("SGD");
@@ -125,7 +127,15 @@ export default function SplitwiseTab() {
 
   useEffect(() => {
     let isMounted = true;
-    fetch("/api/admin/splitwise-settings", { credentials: "include" })
+    if (!club?.id) {
+      setSplitwiseSettings(null);
+      setSplitwiseMessage("Select a club first.");
+      setLoadingSplitwise(false);
+      return () => {
+        isMounted = false;
+      };
+    }
+    fetch(`/api/admin/splitwise-settings?clubId=${encodeURIComponent(club.id)}`, { credentials: "include" })
       .then((response) => response.json().catch(() => null))
       .then((data) => {
         if (!isMounted) return;
@@ -146,7 +156,7 @@ export default function SplitwiseTab() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [club?.id]);
 
   const loadSplitwiseRunHistory = async () => {
     setLoadingSplitwiseRunHistory(true);
@@ -171,6 +181,10 @@ export default function SplitwiseTab() {
 
   const saveSplitwiseSettings = async () => {
     setSplitwiseMessage(null);
+    if (!club?.id) {
+      setSplitwiseMessage("Select a club first.");
+      return;
+    }
     const locationReplacements = splitwiseLocationMappingsText
       .split("\n")
       .map((line) => line.trim())
@@ -184,7 +198,7 @@ export default function SplitwiseTab() {
       })
       .filter((row): row is { from: string; to: string } => Boolean(row));
 
-    const response = await fetch("/api/admin/splitwise-settings", {
+    const response = await fetch(`/api/admin/splitwise-settings?clubId=${encodeURIComponent(club.id)}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       credentials: "include",

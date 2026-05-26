@@ -109,6 +109,12 @@
 - Decision: Add `splitwise_settings.court_conversion_fee_percent` with a default of `1.00` and apply it only when building `COURT` Splitwise expense totals. Keep `SHUTTLECOCK` expense math on its existing fixed-fee redistribution model without conversion fee adjustment.
 - Rationale: Court bookings incur a conversion fee that should be recovered in the court Splitwise record, while shuttlecock redistribution is a separate internal reimbursement flow and should not be inflated.
 
+## ADR-0019: Multi-Club Model With Per-Club Tokens, Memberships, and Splitwise Settings
+- Date: 2026-05-19
+- Status: Accepted
+- Decision: Introduce `clubs` with per-club invite tokens (`club_tokens`), memberships (`club_players`), and per-club Splitwise settings (`club_splitwise_settings`). Public access continues via invite tokens, but the client stores multiple club tokens and aggregates sessions across clubs. Splitwise sync reads per-club settings and creates expenses into each club’s Splitwise group.
+- Rationale: Enables players to participate in multiple clubs while keeping access control simple (token-based) and keeping automation deterministic per club.
+
 ## Pending Decisions
 - Player identity model (predefined list vs free-text vs hybrid).
 - Session edit rules (post-close edits, participant locking, Splitwise regeneration).

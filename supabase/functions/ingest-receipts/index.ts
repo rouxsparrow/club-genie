@@ -45,6 +45,27 @@ async function getAutomationTimezone(supabase: ReturnType<typeof createClient>) 
   return ingestionDefaults.timezone;
 }
 
+async function getIngestionClubId(supabase: ReturnType<typeof createClient>) {
+  const { data, error } = await supabase
+    .from("automation_settings")
+    .select("ingestion_club_id")
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (error) {
+    const message = error.message ?? "";
+    if (message.includes("ingestion_club_id")) {
+      return null;
+    }
+    throw new Error("automation_settings_lookup_failed");
+  }
+
+  const clubId = typeof (data as { ingestion_club_id?: unknown } | null)?.ingestion_club_id === "string"
+    ? ((data as { ingestion_club_id: string }).ingestion_club_id ?? "").trim()
+    : "";
+  return clubId || null;
+}
+
 async function requireIngestionAuth(req: Request) {
   const providedAutomationSecret = req.headers.get("x-automation-secret")?.trim() ?? null;
   const expectedAutomationSecret = Deno.env.get("AUTOMATION_SECRET");
@@ -55,7 +76,22 @@ async function requireIngestionAuth(req: Request) {
   return false;
 }
 
-async function loadDefaultPayerId(supabase: ReturnType<typeof createClient>) {
+async function loadDefaultPayerId(supabase: ReturnType<typeof createClient>, clubId: string | null) {
+  if (clubId) {
+    const { data, error } = await supabase
+      .from("club_players")
+      .select("player_id")
+      .eq("club_id", clubId)
+      .eq("is_default_payer", true)
+      .limit(1)
+      .maybeSingle();
+
+    if (!error) {
+      const payerId = typeof data?.player_id === "string" && data.player_id.trim() ? data.player_id : null;
+      if (payerId) return payerId;
+    }
+  }
+
   const { data, error } = await supabase
     .from("players")
     .select("id")
@@ -73,10 +109,11 @@ async function loadDefaultPayerId(supabase: ReturnType<typeof createClient>) {
   return payerId;
 }
 
-async function resolveSessionPayerIdForDate(supabase: ReturnType<typeof createClient>, sessionDate: string) {
+async function resolveSessionPayerIdForDate(supabase: ReturnType<typeof createClient>, clubId: string | null, sessionDate: string) {
   const { data: existing, error } = await supabase
     .from("sessions")
     .select("id,status,payer_player_id")
+    .eq("club_id", clubId ?? "00000000-0000-0000-0000-000000000000")
     .eq("session_date", sessionDate)
     .maybeSingle();
 
@@ -95,25 +132,26 @@ async function resolveSessionPayerIdForDate(supabase: ReturnType<typeof createCl
     };
   }
 
-  const defaultPayerId = await loadDefaultPayerId(supabase);
+  const defaultPayerId = await loadDefaultPayerId(supabase, clubId);
   return {
     existingStatus: existing?.status ?? null,
     payerPlayerId: defaultPayerId
   };
 }
 
-async function upsertDraftSessionForDate(supabase: ReturnType<typeof createClient>, sessionDate: string) {
-  const resolved = await resolveSessionPayerIdForDate(supabase, sessionDate);
+async function upsertDraftSessionForDate(supabase: ReturnType<typeof createClient>, clubId: string, sessionDate: string) {
+  const resolved = await resolveSessionPayerIdForDate(supabase, clubId, sessionDate);
   const { error } = await supabase
     .from("sessions")
     .upsert(
       {
+        club_id: clubId,
         session_date: sessionDate,
         status: "DRAFT",
         payer_player_id: resolved.payerPlayerId,
         updated_at: new Date().toISOString()
       },
-      { onConflict: "session_date" }
+      { onConflict: "club_id,session_date" }
     );
   if (error) {
     throw new Error("session_draft_upsert_failed");
@@ -128,11 +166,12 @@ function toCourtJson(courts: ParsedCourtRow[]) {
   }));
 }
 
-async function recomputeSessionForDate(supabase: ReturnType<typeof createClient>, sessionDate: string) {
+async function recomputeSessionForDate(supabase: ReturnType<typeof createClient>, clubId: string, sessionDate: string) {
   const { data: receipts, error: receiptsError } = await supabase
     .from("email_receipts")
     .select("parsed_total_fee, parsed_courts, parsed_location")
     .eq("parse_status", "SUCCESS")
+    .eq("club_id", clubId)
     .eq("parsed_session_date", sessionDate);
 
   if (receiptsError) {
@@ -144,13 +183,14 @@ async function recomputeSessionForDate(supabase: ReturnType<typeof createClient>
     throw new Error("invalid_receipt_aggregate");
   }
 
-  const resolvedPayer = await resolveSessionPayerIdForDate(supabase, sessionDate);
+  const resolvedPayer = await resolveSessionPayerIdForDate(supabase, clubId, sessionDate);
   const nextStatus = resolvedPayer.existingStatus === "CLOSED" ? "CLOSED" : "OPEN";
 
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
     .upsert(
       {
+        club_id: clubId,
         session_date: sessionDate,
         status: nextStatus,
         payer_player_id: resolvedPayer.payerPlayerId,
@@ -160,7 +200,7 @@ async function recomputeSessionForDate(supabase: ReturnType<typeof createClient>
         location: aggregate.location,
         updated_at: new Date().toISOString()
       },
-      { onConflict: "session_date" }
+      { onConflict: "club_id,session_date" }
     )
     .select("id")
     .single();
@@ -197,6 +237,7 @@ function normalizeLocation(value: string) {
 
 async function hasLocationConflict(
   supabase: ReturnType<typeof createClient>,
+  clubId: string,
   sessionDate: string,
   location: string
 ) {
@@ -204,6 +245,7 @@ async function hasLocationConflict(
     .from("email_receipts")
     .select("parsed_location")
     .eq("parse_status", "SUCCESS")
+    .eq("club_id", clubId)
     .eq("parsed_session_date", sessionDate);
 
   if (error) {
@@ -256,6 +298,14 @@ Deno.serve(async (req) => {
     });
   }
 
+  const clubId = await getIngestionClubId(supabase);
+  if (!clubId) {
+    return new Response(JSON.stringify({ ok: false, error: "missing_ingestion_club_id" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+
   const { data: existingReceipt } = await supabase
     .from("email_receipts")
     .select("id")
@@ -279,6 +329,7 @@ Deno.serve(async (req) => {
     const sessionDate = parseSessionDate(`${rawHtml}\n${rawText ?? ""}`);
 
     await supabase.from("email_receipts").insert({
+      club_id: clubId,
       gmail_message_id: messageId,
       received_at: new Date().toISOString(),
       raw_html: persistedRawBody,
@@ -292,7 +343,7 @@ Deno.serve(async (req) => {
 
     if (sessionDate) {
       try {
-        await upsertDraftSessionForDate(supabase, sessionDate);
+        await upsertDraftSessionForDate(supabase, clubId, sessionDate);
       } catch (draftError) {
         const draftErrorMessage = draftError instanceof Error ? draftError.message : "session_draft_upsert_failed";
         return new Response(JSON.stringify({ ok: false, error: draftErrorMessage }), {
@@ -308,9 +359,10 @@ Deno.serve(async (req) => {
     });
   }
 
-  const locationConflict = await hasLocationConflict(supabase, parsed.sessionDate, parsed.location);
+  const locationConflict = await hasLocationConflict(supabase, clubId, parsed.sessionDate, parsed.location);
   if (locationConflict) {
     await supabase.from("email_receipts").insert({
+      club_id: clubId,
       gmail_message_id: messageId,
       received_at: new Date().toISOString(),
       raw_html: persistedRawBody,
@@ -323,7 +375,7 @@ Deno.serve(async (req) => {
     });
 
     try {
-      await upsertDraftSessionForDate(supabase, parsed.sessionDate);
+      await upsertDraftSessionForDate(supabase, clubId, parsed.sessionDate);
     } catch (draftError) {
       const draftErrorMessage = draftError instanceof Error ? draftError.message : "session_draft_upsert_failed";
       return new Response(JSON.stringify({ ok: false, error: draftErrorMessage }), {
@@ -339,6 +391,7 @@ Deno.serve(async (req) => {
   }
 
   const { error: insertReceiptError } = await supabase.from("email_receipts").insert({
+    club_id: clubId,
     gmail_message_id: messageId,
     received_at: new Date().toISOString(),
     raw_html: persistedRawBody,
@@ -357,7 +410,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const sessionId = await recomputeSessionForDate(supabase, parsed.sessionDate);
+    const sessionId = await recomputeSessionForDate(supabase, clubId, parsed.sessionDate);
 
     return new Response(JSON.stringify({ ok: true, sessionId }), {
       status: 200,

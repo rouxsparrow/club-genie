@@ -1,14 +1,18 @@
-export type TabKey = 'accounts' | 'players' | 'club' | 'automation' | 'emails' | 'splitwise';
+export type TabKey = 'accounts' | 'clubs' | 'players' | 'automation' | 'emails';
+
+export type Club = {
+  id: string;
+  name: string;
+};
 
 export type Player = {
   id: string;
   name: string;
   active: boolean;
   splitwise_user_id?: number | null;
-  is_default_payer?: boolean;
-  shuttlecock_paid?: boolean;
   avatar_path?: string | null;
   avatar_url?: string | null;
+  clubs?: Club[];
 };
 
 export type PlayersResponse = {

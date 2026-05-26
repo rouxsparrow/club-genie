@@ -14,6 +14,8 @@ type PlayerMutationResponse = {
 
 export default function PlayersTab() {
   const [players, setPlayers] = useState<Player[]>([]);
+  const [clubs, setClubs] = useState<Array<{ id: string; name: string }>>([]);
+  const [targetClubId, setTargetClubId] = useState<string>("");
   const [loadingPlayers, setLoadingPlayers] = useState(true);
   const [newPlayerName, setNewPlayerName] = useState("");
   const [playersError, setPlayersError] = useState<string | null>(null);
@@ -29,10 +31,18 @@ export default function PlayersTab() {
   const activePlayers = useMemo(() => players.filter((player) => player.active), [players]);
   const inactivePlayers = useMemo(() => players.filter((player) => !player.active), [players]);
 
+  const refreshClubs = async () => {
+    const data = await adminFetch<{ ok: boolean; clubs?: Array<{ id: string; name: string }>; error?: string }>("/api/admin/clubs");
+    if (!data.ok) return;
+    const next = Array.isArray(data.clubs) ? data.clubs : [];
+    setClubs(next);
+    setTargetClubId((prev) => (prev && next.some((c) => c.id === prev) ? prev : (next[0]?.id ?? "")));
+  };
+
   const refreshPlayers = async () => {
     setLoadingPlayers(true);
     setPlayersError(null);
-    const data = await adminFetch<PlayersResponse>("/api/admin/players");
+    const data = await adminFetch<PlayersResponse>(`/api/admin/players`);
     if (data.ok) {
       setPlayers(data.players ?? []);
     } else {
@@ -42,6 +52,7 @@ export default function PlayersTab() {
   };
 
   useEffect(() => {
+    void refreshClubs();
     void refreshPlayers();
   }, []);
 
@@ -63,6 +74,25 @@ export default function PlayersTab() {
 
   const togglePlayerAdvanced = (playerId: string) => {
     setExpandedPlayerAdvanced((prev) => ({ ...prev, [playerId]: !prev[playerId] }));
+  };
+
+  const addPlayerToSelectedClub = async (playerId: string) => {
+    if (!targetClubId) {
+      setActionMessage("Select a club first.");
+      return;
+    }
+    setActionMessage(null);
+    const data = await adminFetch<{ ok: boolean; error?: string }>(`/api/admin/clubs/${targetClubId}/members`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ playerId }),
+    });
+    if (!data.ok) {
+      setActionMessage(data.error ?? "Failed to add player to club.");
+      return;
+    }
+    await refreshPlayers();
+    setActionMessage("Player added to club.");
   };
 
   const handleAddPlayer = async () => {
@@ -153,44 +183,6 @@ export default function PlayersTab() {
     setActionMessage("Splitwise user id updated.");
   };
 
-  const setDefaultPayer = async (playerId: string, enabled: boolean) => {
-    setActionMessage(null);
-    const data = await adminFetch<PlayerMutationResponse>(`/api/admin/players/${playerId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ isDefaultPayer: enabled }),
-    });
-    if (!data.ok || !data.player) {
-      setActionMessage(data.error ?? "Failed to update default payer.");
-      return;
-    }
-    setPlayers((prev) =>
-      prev.map((p) => {
-        if (enabled) {
-          return { ...p, is_default_payer: p.id === playerId };
-        }
-        if (p.id === playerId) return { ...p, is_default_payer: false };
-        return p;
-      }),
-    );
-    setActionMessage(enabled ? "Default payer updated." : "Default payer cleared.");
-  };
-
-  const setPlayerShuttlecockPaid = async (playerId: string, enabled: boolean) => {
-    setActionMessage(null);
-    const data = await adminFetch<PlayerMutationResponse>(`/api/admin/players/${playerId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ shuttlecockPaid: enabled }),
-    });
-    if (!data.ok || !data.player) {
-      setActionMessage(data.error ?? "Failed to update shuttlecock setting.");
-      return;
-    }
-    updatePlayerInState(data.player);
-    setActionMessage("Shuttlecock paid updated.");
-  };
-
   const uploadPlayerAvatar = async (playerId: string) => {
     const file = avatarFileDrafts[playerId];
     if (!file) {
@@ -252,8 +244,25 @@ export default function PlayersTab() {
         </div>
         <h2 className="mt-3 text-2xl font-semibold">Players</h2>
         <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
-          Manage club roster with compact cards and expandable advanced controls.
+          Manage global player directory. Add players to clubs from the Clubs tab or using the quick-add control here.
         </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="grid gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">Quick add to club</span>
+            <select className="v2-admin-select" value={targetClubId} onChange={(e) => setTargetClubId(e.target.value)}>
+              {clubs.length === 0 ? (
+                <option value="" disabled>
+                  No clubs yet
+                </option>
+              ) : null}
+              {clubs.map((clubRow) => (
+                <option key={clubRow.id} value={clubRow.id}>
+                  {clubRow.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="rounded-2xl border border-slate-200/60 bg-slate-50 px-4 py-3 dark:border-ink-700/60 dark:bg-ink-900/30">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
@@ -320,6 +329,8 @@ export default function PlayersTab() {
             <ul className="mt-4 space-y-3">
               {activePlayers.map((player) => {
                 const isAdvancedOpen = Boolean(expandedPlayerAdvanced[player.id]);
+                const playerClubs = Array.isArray(player.clubs) ? player.clubs : [];
+                const alreadyInSelectedClub = Boolean(targetClubId && playerClubs.some((clubRow) => clubRow.id === targetClubId));
                 return (
                   <li key={player.id} className="rounded-2xl border border-slate-200/70 p-4 dark:border-ink-700/60">
                     {editingPlayerId === player.id ? (
@@ -361,9 +372,33 @@ export default function PlayersTab() {
                               avatarUrl={player.avatar_url ?? null}
                               sizeClass="h-10 w-10 text-sm"
                             />
-                            <strong className="truncate">{player.name}</strong>
+                            <div className="min-w-0">
+                              <strong className="block truncate">{player.name}</strong>
+                              {playerClubs.length > 0 ? (
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {playerClubs.map((clubRow) => (
+                                    <span
+                                      key={clubRow.id}
+                                      className="rounded-full border border-slate-200/70 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-ink-700/60 dark:bg-ink-900/30 dark:text-slate-200"
+                                    >
+                                      {clubRow.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="mt-1 text-[11px] text-slate-400">No clubs yet.</p>
+                              )}
+                            </div>
                           </div>
                           <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={!targetClubId || alreadyInSelectedClub}
+                              onClick={() => addPlayerToSelectedClub(player.id)}
+                              className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 disabled:opacity-50 dark:border-ink-700/60 dark:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                            >
+                              {alreadyInSelectedClub ? "In club" : "Add to club"}
+                            </button>
                             <button
                               type="button"
                               onClick={() => startRename(player)}
@@ -455,24 +490,6 @@ export default function PlayersTab() {
                                   className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-ink-700/60 dark:bg-ink-800"
                                   placeholder="e.g. 54123"
                                 />
-                              </label>
-                              <label className="mt-5 flex items-center gap-2 font-semibold md:mt-6">
-                                <input
-                                  name={`default_payer_${player.id}`}
-                                  type="checkbox"
-                                  checked={Boolean(player.is_default_payer)}
-                                  onChange={(event) => setDefaultPayer(player.id, event.target.checked)}
-                                />
-                                Default payer
-                              </label>
-                              <label className="flex items-center gap-2 font-semibold">
-                                <input
-                                  name={`shuttlecock_paid_${player.id}`}
-                                  type="checkbox"
-                                  checked={Boolean(player.shuttlecock_paid)}
-                                  onChange={(event) => setPlayerShuttlecockPaid(player.id, event.target.checked)}
-                                />
-                                Shuttlecock paid
                               </label>
                             </div>
                           </div>
